@@ -73,3 +73,9 @@ variable "droplet_region" {
   type        = string
   default     = "nyc3"
 }
+
+variable "vnc_domain" {
+  description = "Domain for HTTPS VNC access (must have DNS A record pointing to droplet)"
+  type        = string
+
+}

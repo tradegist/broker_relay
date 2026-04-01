@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = ">= 1.5.0"
 
   required_providers {
     digitalocean = {
@@ -83,6 +83,7 @@ resource "digitalocean_droplet" "relay" {
       flex_query_id  = var.flex_query_id
       poll_interval  = var.poll_interval
       time_zone      = var.time_zone
+      vnc_domain     = var.vnc_domain
     })
     destination = "/opt/ibkr-relay/.env"
   }
@@ -93,6 +94,14 @@ resource "digitalocean_droplet" "relay" {
       "cd /opt/ibkr-relay && docker compose up -d",
     ]
   }
+}
+
+# ---------------------------------------------------------------------------
+# Reserved (static) IP — survives power cycles / reboots
+# ---------------------------------------------------------------------------
+resource "digitalocean_reserved_ip" "relay" {
+  region     = var.droplet_region
+  droplet_id = digitalocean_droplet.relay.id
 }
 
 # ---------------------------------------------------------------------------
@@ -109,11 +118,17 @@ resource "digitalocean_firewall" "relay" {
     source_addresses = ["${local.deployer_ip}/32"]
   }
 
-  # noVNC (browser-based VNC for 2FA)
+  # HTTPS (Caddy reverse proxy for noVNC)
   inbound_rule {
     protocol         = "tcp"
-    port_range       = "6080"
-    source_addresses = ["${local.deployer_ip}/32"]
+    port_range       = "80"
+    source_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "443"
+    source_addresses = ["0.0.0.0/0", "::/0"]
   }
 
   # All outbound (DNS, HTTPS for Docker pulls, IBKR API, etc.)

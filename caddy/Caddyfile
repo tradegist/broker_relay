@@ -1,0 +1,3 @@
+{$VNC_DOMAIN} {
+    reverse_proxy novnc:8080
+}
