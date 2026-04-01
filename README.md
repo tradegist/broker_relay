@@ -189,7 +189,10 @@ If `TARGET_WEBHOOK_URL` is empty, the relay logs the payload to stdout (dry-run 
 
 ```
 ├── deploy.sh              # Local deployment script
-├── destroy.sh             # Teardown script
+├── destroy.sh             # Teardown script (permanent)
+├── pause.sh               # Snapshot + delete droplet (save costs)
+├── resume.sh              # Restore droplet from snapshot
+├── sync-env.sh            # Push .env + restart services
 ├── order.sh               # Place orders via HTTPS API
 ├── poll-now.sh            # Trigger an immediate Flex poll
 ├── .env.example           # Configuration template
@@ -311,6 +314,26 @@ curl -s -X POST "https://trade.example.com/ibkr/run-poll" \
   -d '{"ibkr_flex_token": "abc", "ibkr_flex_query_id": "123"}' \
   | python3 -m json.tool
 ```
+
+## Pause & Resume
+
+To stop billing for the droplet without losing state:
+
+```bash
+# Snapshot the droplet, unassign the reserved IP, delete the droplet
+./pause.sh
+
+# Later — recreate the droplet from the snapshot and reassign the IP
+./resume.sh
+```
+
+**Costs while paused:**
+
+- Droplet: **$0** (deleted)
+- Snapshot: ~$0.06/GB/month (~$0.05/month for a fresh 25GB disk)
+- Reserved IP: **$5/month** while unassigned (free when assigned to a droplet)
+
+After resuming, you'll need to complete 2FA again via the VNC interface.
 
 ## SSH Access
 
