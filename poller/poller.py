@@ -41,24 +41,29 @@ def init_db():
     conn.execute("""
         CREATE TABLE IF NOT EXISTS processed_fills (
             exec_id TEXT PRIMARY KEY,
-            processed_at TEXT DEFAULT (datetime('now')),
-            payload TEXT
+            processed_at TEXT DEFAULT (datetime('now'))
         )
     """)
     conn.commit()
     return conn
 
 
-def is_processed(conn, exec_id):
-    return conn.execute(
-        "SELECT 1 FROM processed_fills WHERE exec_id = ?", (exec_id,)
-    ).fetchone() is not None
+def get_processed_ids(conn, exec_ids):
+    """Return the subset of exec_ids already in the DB."""
+    if not exec_ids:
+        return set()
+    placeholders = ",".join("?" for _ in exec_ids)
+    rows = conn.execute(
+        f"SELECT exec_id FROM processed_fills WHERE exec_id IN ({placeholders})",
+        list(exec_ids),
+    ).fetchall()
+    return {r[0] for r in rows}
 
 
-def mark_processed(conn, exec_id, payload):
-    conn.execute(
-        "INSERT OR IGNORE INTO processed_fills (exec_id, payload) VALUES (?, ?)",
-        (exec_id, json.dumps(payload, default=str)),
+def mark_processed(conn, exec_ids):
+    conn.executemany(
+        "INSERT OR IGNORE INTO processed_fills (exec_id) VALUES (?)",
+        [(eid,) for eid in exec_ids],
     )
     conn.commit()
 
@@ -161,7 +166,9 @@ def parse_trades(xml_text):
     seen = set()
 
     # Trade Confirmation queries use <TradeConfirmation>,
-    # Activity queries use <Trade>. Check both.
+    # Activity queries use <Trade> and <Order>. We only want <Trade> entries
+    # (individual fills), not <Order> (aggregated). Skip <Order> because it
+    # has no transactionID and duplicates the fill data.
     for tag in ("TradeConfirmation", "Trade"):
         for el in root.iter(tag):
             exec_id = el.get("transactionID", "") or el.get("ibExecID", "")
@@ -174,39 +181,104 @@ def parse_trades(xml_text):
             except (ValueError, TypeError):
                 qty = 0.0
             try:
-                price = float(el.get("price", 0))
+                price = float(el.get("tradePrice", 0) or el.get("price", 0))
             except (ValueError, TypeError):
                 price = 0.0
             try:
-                commission = float(el.get("commission", 0))
+                commission = float(el.get("ibCommission", 0) or el.get("commission", 0))
             except (ValueError, TypeError):
                 commission = 0.0
 
             trades.append({
                 "event": "fill",
                 "symbol": el.get("symbol", ""),
+                "underlyingSymbol": el.get("underlyingSymbol", ""),
                 "secType": el.get("assetCategory", ""),
-                "exchange": el.get("exchange", ""),
-                "action": el.get("buySell", ""),
+                "exchange": el.get("listingExchange", "") or el.get("exchange", ""),
+                "op": el.get("buySell", ""),
                 "quantity": qty,
                 "price": price,
                 "tradeDate": el.get("tradeDate", ""),
                 "tradeTime": el.get("dateTime", ""),
-                "orderId": el.get("orderID", ""),
+                "orderTime": el.get("orderTime", ""),
+                "orderId": el.get("ibOrderID", "") or el.get("orderID", ""),
                 "execId": exec_id,
                 "account": el.get("accountId", ""),
                 "commission": commission,
+                "commissionCurrency": el.get("ibCommissionCurrency", ""),
                 "currency": el.get("currency", ""),
+                "orderType": el.get("orderType", ""),
             })
 
     return trades
+
+
+def _ibkr_dt_to_iso(dt_str):
+    """Convert IBKR datetime 'YYYYMMDD;HHmmss' to ISO 'YYYY-MM-DDTHH:MM:SS'."""
+    try:
+        d, t = dt_str.split(";")
+        return f"{d[:4]}-{d[4:6]}-{d[6:8]}T{t[:2]}:{t[2:4]}:{t[4:6]}"
+    except (ValueError, IndexError):
+        return dt_str
+
+
+def _ibkr_date_to_iso(d):
+    """Convert IBKR date 'YYYYMMDD' to ISO 'YYYY-MM-DD'."""
+    if len(d) == 8 and d.isdigit():
+        return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+    return d
+
+
+def aggregate_by_order(trades):
+    """Group individual fills by orderId, compute weighted avg price."""
+    groups = {}
+    for t in trades:
+        oid = t["orderId"]
+        if not oid:
+            continue
+        groups.setdefault(oid, []).append(t)
+
+    results = []
+    for order_id, fills in groups.items():
+        total_qty = sum(f["quantity"] for f in fills)
+        abs_total = sum(abs(f["quantity"]) for f in fills)
+        avg_price = (
+            sum(abs(f["quantity"]) * f["price"] for f in fills) / abs_total
+            if abs_total else 0.0
+        )
+        total_commission = sum(f["commission"] for f in fills)
+
+        first = fills[0]
+        results.append({
+            "event": "fill",
+            "symbol": first["symbol"],
+            "underlyingSymbol": first["underlyingSymbol"],
+            "secType": first["secType"],
+            "exchange": first["exchange"],
+            "op": first["op"],
+            "quantity": total_qty,
+            "avgPrice": round(avg_price, 8),
+            "tradeDate": _ibkr_date_to_iso(max(f["tradeDate"] for f in fills)),
+            "lastFillTime": _ibkr_dt_to_iso(max(f["tradeTime"] for f in fills)),
+            "orderTime": _ibkr_dt_to_iso(first["orderTime"]),
+            "orderId": order_id,
+            "execIds": [f["execId"] for f in fills],
+            "account": first["account"],
+            "commission": round(total_commission, 4),
+            "commissionCurrency": first["commissionCurrency"],
+            "currency": first["currency"],
+            "orderType": first["orderType"],
+            "fillCount": len(fills),
+        })
+
+    return results
 
 
 # ---------------------------------------------------------------------------
 # Poll cycle
 # ---------------------------------------------------------------------------
 def poll_once(conn=None):
-    """Run a single poll. Returns number of new fills processed."""
+    """Run a single poll. Returns number of new webhook calls sent."""
     close_conn = conn is None
     if close_conn:
         conn = init_db()
@@ -217,29 +289,39 @@ def poll_once(conn=None):
         if xml_text is None:
             return 0
 
-        trades = parse_trades(xml_text)
-        log.info("Received %d trade(s) from Flex report", len(trades))
+        all_trades = parse_trades(xml_text)
+        log.info("Parsed %d individual fill(s) from Flex report", len(all_trades))
 
-        new_count = 0
-        for trade in trades:
-            if is_processed(conn, trade["execId"]):
-                continue
+        # Always show a sample of the first aggregated order for debugging
+        all_orders = aggregate_by_order(all_trades)
+        if all_orders:
+            log.info("Sample order (first):\n%s", json.dumps(all_orders[0], default=str, indent=2))
 
-            log.info(
-                "New fill: %s %s %s @ %s",
-                trade["action"], trade["quantity"],
-                trade["symbol"], trade["price"],
-            )
-            send_webhook(trade)
-            mark_processed(conn, trade["execId"], trade)
-            new_count += 1
+        # Filter out already-processed fills
+        all_exec_ids = {t["execId"] for t in all_trades}
+        already_seen = get_processed_ids(conn, all_exec_ids)
+        new_trades = [t for t in all_trades if t["execId"] not in already_seen]
+        log.info("%d new fill(s) after dedup", len(new_trades))
 
-        if new_count == 0:
+        if not new_trades:
             log.info("No new fills")
-        else:
-            log.info("Processed %d new fill(s)", new_count)
+            return 0
 
-        return new_count
+        # Aggregate only the NEW fills by order
+        orders = aggregate_by_order(new_trades)
+        log.info("Aggregated into %d order(s)", len(orders))
+
+        for order in orders:
+            log.info(
+                "New fill: %s %s %s @ avgPrice %s (qty %s, %d fill(s))",
+                order["op"], order["symbol"], order["orderId"],
+                order["avgPrice"], order["quantity"], order["fillCount"],
+            )
+            send_webhook(order)
+            mark_processed(conn, order["execIds"])
+
+        log.info("Sent %d webhook(s)", len(orders))
+        return len(orders)
     finally:
         if close_conn:
             conn.close()
