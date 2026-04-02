@@ -173,7 +173,7 @@ async def handle_order(request: web.Request) -> web.Response:
 
 
 async def handle_health(request: web.Request) -> web.Response:
-    return web.json_response({"connected": ib.isConnected()})
+    return web.json_response({"connected": ib.isConnected(), "tradingMode": TRADING_MODE})
 
 
 # ---------------------------------------------------------------------------

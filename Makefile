@@ -1,4 +1,4 @@
-.PHONY: deploy destroy pause resume sync order poll poll2 logs stats gateway ssh help
+.PHONY: deploy destroy pause resume sync order poll poll2 test-webhook logs stats gateway ssh help
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
@@ -26,6 +26,9 @@ poll: ## Trigger an immediate Flex poll
 
 poll2: ## Trigger an immediate Flex poll (second poller)
 	python3 -m cli poll 2
+
+test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2])
+	python3 -m cli test-webhook $(S)
 
 logs: ## Stream poller logs (Ctrl+C to stop)
 	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP \

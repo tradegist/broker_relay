@@ -15,7 +15,7 @@ But even with those libraries, you still need to **build a Python app, deploy it
 
 > **Only one endpoint for now?** Yes — more APIs will be exposed as the need arises. PRs welcome.
 
-> **Why a poller instead of listening for events through the Gateway API?** Because IBKR only allows **one active session per user**. If the Gateway is connected and listening for fills, you can't use the IBKR Client Portal or mobile app at the same time. With the poller approach, you can **close the gateway** when you don't need programmatic order placement, trade normally via web/mobile, and know that ~10 minutes later the poller will detect and forward any fills to your webhook. The poller uses the [Flex Web Service](https://www.interactivebrokers.com/en/software/am/am/reports/activityflexqueries.htm) (a REST API), so it **does not require an active Gateway session**.
+> **Why a poller instead of listening for events through the Gateway API?** Because IBKR only allows **one active session per user**. If the Gateway is connected and listening for fills, you can't use the IBKR Client Portal or mobile app at the same time. With the poller approach, you can **close the gateway** when you don't need programmatic order placement, trade normally via web/mobile, and know that ~10 minutes later the poller will detect and forward any fills to your webhook. The poller uses the [Flex Web Service](https://www.interactivebrokers.com/campus/ibkr-api-page/flex-web-service/) (a REST API), so it **does not require an active Gateway session**.
 
 ## Table of Contents
 
@@ -288,6 +288,7 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make sync        Push .env + restart all services (or: make sync S=gateway)
   make order       Place an order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE])
   make poll        Trigger an immediate Flex poll
+  make test-webhook Send sample trades to webhook endpoint
   make gateway     Start IB Gateway container (then open VNC for 2FA)
   make logs        Stream poller logs (Ctrl+C to stop)
   make stats       Show container resource usage
@@ -303,6 +304,8 @@ python3 -m cli order 2 TSLA MKT
 python3 -m cli order -2 TSLA LMT 380
 python3 -m cli poll
 python3 -m cli poll 2 # second poller
+python3 -m cli test-webhook   # send sample trades to webhook 1
+python3 -m cli test-webhook 2 # send sample trades to webhook 2
 python3 -m cli pause
 python3 -m cli resume
 python3 -m cli destroy
@@ -317,54 +320,73 @@ make order Q=2 SYM=TSLA T=MKT                  # buy 2 TSLA at market
 make order Q=-2 SYM=TSLA T=LMT P=380           # sell 2 TSLA limit $380
 make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR   # buy European ETF in EUR
 make poll                                      # trigger immediate Flex poll
+make test-webhook                              # send 3 sample trades to webhook
+make test-webhook S=2                          # send to second webhook
 make logs                                      # stream poller logs
 make logs S=webhook-relay                      # stream relay logs
+make logs S=ib-gateway                         # stream gateway logs
 make gateway                                   # start gateway + complete 2FA in browser
 make pause                           # snapshot + delete droplet
 make resume                          # restore from snapshot
 ```
 
+### Which service to sync
+
+After changing a variable in `.env`, restart only the affected service:
+
+| Variable                                                                                                                              | Service       | Command               |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ------------- | --------------------- |
+| `TWS_USERID`, `TWS_PASSWORD`, `TRADING_MODE`, `JAVA_HEAP_SIZE`                                                                        | ib-gateway    | `make sync S=gateway` |
+| `API_TOKEN`                                                                                                                           | webhook-relay | `make sync S=relay`   |
+| `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, `WEBHOOK_HEADER_NAME/VALUE`, `POLL_INTERVAL_SECONDS` | poller        | `make sync S=poller`  |
+| `VNC_DOMAIN`, `TRADE_DOMAIN`                                                                                                          | caddy         | `make sync S=caddy`   |
+| Multiple services or unsure                                                                                                           | all           | `make sync`           |
+
+```
+
 ## Project Structure
 
 ```
-├── Makefile               # CLI shortcuts (make deploy, make sync, etc.)
-├── cli/                   # Python CLI (replaces shell scripts)
-│   ├── __init__.py        # Shared helpers (env loading, SSH, DO API, validation)
-│   ├── __main__.py        # Entry point (python3 -m cli <command>)
-│   ├── deploy.py          # Terraform init + apply
-│   ├── destroy.py         # Terraform destroy
-│   ├── pause.py           # Snapshot + delete droplet
-│   ├── resume.py          # Restore from snapshot
-│   ├── sync.py            # Push .env + restart services
-│   ├── order.py           # Place orders via HTTPS API
-│   └── poll.py            # Trigger an immediate Flex poll
-├── .env.example           # Configuration template
+
+├── Makefile # CLI shortcuts (make deploy, make sync, etc.)
+├── cli/ # Python CLI (replaces shell scripts)
+│ ├── **init**.py # Shared helpers (env loading, SSH, DO API, validation)
+│ ├── **main**.py # Entry point (python3 -m cli <command>)
+│ ├── deploy.py # Terraform init + apply
+│ ├── destroy.py # Terraform destroy
+│ ├── pause.py # Snapshot + delete droplet
+│ ├── resume.py # Restore from snapshot
+│ ├── sync.py # Push .env + restart services
+│ ├── order.py # Place orders via HTTPS API
+│ └── poll.py # Trigger an immediate Flex poll
+├── .env.example # Configuration template
 ├── .github/workflows/
-│   └── deploy.yml         # GitHub Actions workflow
+│ └── deploy.yml # GitHub Actions workflow
 ├── terraform/
-│   ├── main.tf            # Droplet, firewall, reserved IP, provisioners
-│   ├── variables.tf       # Terraform variables
-│   ├── outputs.tf         # Droplet IP, VNC/Trade URLs, SSH key
-│   ├── cloud-init.sh      # Docker install + repo clone (no secrets)
-│   └── env.tftpl          # .env template for file provisioner
-├── docker-compose.yml     # Container orchestration (6 services)
+│ ├── main.tf # Droplet, firewall, reserved IP, provisioners
+│ ├── variables.tf # Terraform variables
+│ ├── outputs.tf # Droplet IP, VNC/Trade URLs, SSH key
+│ ├── cloud-init.sh # Docker install + repo clone (no secrets)
+│ └── env.tftpl # .env template for file provisioner
+├── docker-compose.yml # Container orchestration (6 services)
 ├── caddy/
-│   └── Caddyfile          # Reverse proxy config (VNC + Trade domains)
+│ └── Caddyfile # Reverse proxy config (VNC + Trade domains)
 ├── novnc/
-│   └── index.html         # VNC web client (Start Gateway button)
+│ └── index.html # VNC web client (Start Gateway button)
 ├── gateway-controller/
-│   ├── Dockerfile
-│   ├── start-gateway.sh   # CGI script to start ib-gateway
-│   └── gateway-status.sh  # CGI script to check ib-gateway status
+│ ├── Dockerfile
+│ ├── start-gateway.sh # CGI script to start ib-gateway
+│ └── gateway-status.sh # CGI script to check ib-gateway status
 ├── remote-client/
-│   ├── Dockerfile
-│   ├── requirements.txt   # ib_async, aiohttp
-│   └── client.py          # IB Gateway client + authenticated order API
+│ ├── Dockerfile
+│ ├── requirements.txt # ib_async, aiohttp
+│ └── client.py # IB Gateway client + authenticated order API
 └── poller/
-    ├── Dockerfile
-    ├── requirements.txt   # httpx
-    └── poller.py          # Flex trade poller + webhook sender
-```
+├── Dockerfile
+├── requirements.txt # httpx
+└── poller.py # Flex trade poller + webhook sender
+
+````
 
 ## Flex Web Service Setup
 
@@ -391,7 +413,7 @@ When you need the API again, restart the gateway using either method:
 
 ```bash
 make gateway    # starts the container, then open vnc.example.com for 2FA
-```
+````
 
 **From the browser:**
 
@@ -543,6 +565,12 @@ Stream remote client logs:
 
 ```bash
 make logs S=webhook-relay
+```
+
+Stream IB Gateway logs:
+
+```bash
+make logs S=ib-gateway
 ```
 
 ## Security

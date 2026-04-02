@@ -21,6 +21,14 @@ def main():
     p = sub.add_parser("poll", help="Trigger an immediate Flex poll")
     p.add_argument("poller", nargs="?", default="1", choices=["1", "2"],
                    help="Which poller (default: 1)")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="Run poll via SSH to see full poller logs")
+    p.add_argument("--debug", action="store_true",
+                   help="Dump raw Flex XML (implies -v)")
+
+    p = sub.add_parser("test-webhook", help="Send sample trades to webhook endpoint")
+    p.add_argument("poller", nargs="?", default="1", choices=["1", "2"],
+                   help="Which poller's webhook URL (default: 1)")
 
     p = sub.add_parser("order", help="Place an order")
     p.add_argument("quantity", type=int, help="Positive=BUY, negative=SELL")
@@ -40,7 +48,7 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    from cli import deploy, sync, pause, resume, destroy, poll, order
+    from cli import deploy, sync, pause, resume, destroy, poll, order, test_webhook
 
     commands = {
         "deploy": deploy.run,
@@ -50,6 +58,7 @@ def main():
         "sync": sync.run,
         "poll": poll.run,
         "order": order.run,
+        "test-webhook": test_webhook.run,
     }
 
     commands[args.command](args)
