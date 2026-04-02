@@ -111,7 +111,7 @@ Six containers in a single Docker network:
 - **`novnc`** — [`theasp/novnc`](https://hub.docker.com/r/theasp/novnc). Browser-based VNC proxy for completing 2FA.
 - **`caddy`** — [Caddy 2](https://caddyserver.com/) reverse proxy with automatic HTTPS via Let's Encrypt. Routes traffic to the correct backend based on domain (see [Domains & HTTPS](#domains--https)).
 - **`remote-client`** — Python image connected to IB Gateway via `ib_async`. Exposes an HTTP API (internal port 5000) for placing stock orders, secured with Bearer token authentication.
-- **`poller`** — Python image that polls the IBKR Flex Web Service every 10 minutes for trade confirmations and POSTs new fills to a webhook. Uses SQLite for deduplication. **Does not hold an IBKR session** — trade normally via web/mobile.
+- **`poller`** — Python image that polls the IBKR Flex Web Service every 10 minutes for new fills and POSTs them to a webhook. Supports both **Trade Confirmation** and **Activity** Flex Query types. Uses SQLite for deduplication. **Does not hold an IBKR session** — trade normally via web/mobile.
 - **`gateway-controller`** — Lightweight Alpine sidecar with Docker CLI. Exposes a CGI endpoint so the noVNC page can start the gateway container from the browser.
 
 ## Domains & HTTPS
@@ -231,7 +231,7 @@ All configuration is via environment variables in `.env`:
 | `TRADE_DOMAIN`          | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))  |
 | `API_TOKEN`             | Yes      | —                  | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)  |
 | `IBKR_FLEX_TOKEN`       | Yes      | —                  | Flex Web Service token (from Client Portal)                    |
-| `IBKR_FLEX_QUERY_ID`    | Yes      | —                  | Trade Confirmation Flex Query ID                               |
+| `IBKR_FLEX_QUERY_ID`    | Yes      | —                  | Flex Query ID (Trade Confirmation or Activity)                 |
 | `TARGET_WEBHOOK_URL`    | No       | —                  | Webhook endpoint (empty = log-only dry-run)                    |
 | `WEBHOOK_SECRET`        | Yes      | —                  | HMAC-SHA256 key for signing payloads                           |
 | `POLL_INTERVAL_SECONDS` | No       | `600`              | Flex poll interval (seconds)                                   |
@@ -287,7 +287,7 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make resume      Restore droplet from snapshot
   make sync        Push .env + restart all services (or: make sync S=gateway)
   make order       Place an order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE])
-  make poll        Trigger an immediate Flex poll
+  make poll        Trigger an immediate Flex poll (V=1 verbose, DEBUG=1 XML, REPLAY=N resend)
   make test-webhook Send sample trades to webhook endpoint
   make gateway     Start IB Gateway container (then open VNC for 2FA)
   make logs        Stream poller logs (Ctrl+C to stop)
@@ -320,6 +320,9 @@ make order Q=2 SYM=TSLA T=MKT                  # buy 2 TSLA at market
 make order Q=-2 SYM=TSLA T=LMT P=380           # sell 2 TSLA limit $380
 make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR   # buy European ETF in EUR
 make poll                                      # trigger immediate Flex poll
+make poll V=1                                  # verbose (SSH, full poller logs)
+make poll DEBUG=1                              # dump raw Flex XML
+make poll REPLAY=3                             # resend 3 trades (skip dedup)
 make test-webhook                              # send 3 sample trades to webhook
 make test-webhook S=2                          # send to second webhook
 make logs                                      # stream poller logs
@@ -509,7 +512,25 @@ Trigger an immediate poll without waiting for the next interval:
 make poll
 ```
 
-Or call the endpoint directly with `curl`:
+Additional flags:
+
+```bash
+make poll V=1                # verbose — run via SSH, see full poller logs
+make poll DEBUG=1             # dump raw Flex XML (implies verbose)
+make poll REPLAY=3            # resend 3 trades even if already processed (for testing)
+make poll REPLAY=5 DEBUG=1    # combine flags
+```
+
+Or use the CLI directly:
+
+```bash
+python3 -m cli poll              # normal (HTTP)
+python3 -m cli poll -v           # verbose (SSH)
+python3 -m cli poll --debug      # raw XML
+python3 -m cli poll --replay 3   # resend 3 trades
+```
+
+You can also call the endpoint directly with `curl`:
 
 ```bash
 source .env && curl -s -X POST "https://${TRADE_DOMAIN}/ibkr/run-poll" \

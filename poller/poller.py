@@ -205,9 +205,9 @@ def parse_trades(xml_text):
     # Activity queries use <Trade> and <Order>. We only want <Trade> entries
     # (individual fills), not <Order> (aggregated). Skip <Order> because it
     # has no transactionID and duplicates the fill data.
-    for tag in ("TradeConfirmation", "Trade"):
+    for tag in ("TradeConfirmation", "TradeConfirm", "Trade"):
         for el in root.iter(tag):
-            exec_id = el.get("transactionID", "") or el.get("ibExecID", "")
+            exec_id = el.get("transactionID", "") or el.get("ibExecID", "") or el.get("tradeID", "")
             if not exec_id or exec_id in seen:
                 continue
             seen.add(exec_id)
@@ -241,7 +241,7 @@ def parse_trades(xml_text):
                 "execId": exec_id,
                 "account": el.get("accountId", ""),
                 "commission": commission,
-                "commissionCurrency": el.get("ibCommissionCurrency", ""),
+                "commissionCurrency": el.get("ibCommissionCurrency", "") or el.get("commissionCurrency", ""),
                 "currency": el.get("currency", ""),
                 "orderType": el.get("orderType", ""),
             })
@@ -313,7 +313,7 @@ def aggregate_by_order(trades):
 # ---------------------------------------------------------------------------
 # Poll cycle
 # ---------------------------------------------------------------------------
-def poll_once(conn=None, flex_token=None, flex_query_id=None, debug=False):
+def poll_once(conn=None, flex_token=None, flex_query_id=None, debug=False, replay=0):
     """Run a single poll. Returns list of new aggregated orders."""
     close_conn = conn is None
     if close_conn:
@@ -368,6 +368,12 @@ def poll_once(conn=None, flex_token=None, flex_query_id=None, debug=False):
         log.info("%d new fill(s) after dedup", len(new_trades))
 
         if not new_trades:
+            if replay and all_trades:
+                replay_trades = all_trades[:replay]
+                orders = aggregate_by_order(replay_trades)
+                log.info("Replay mode: resending %d fill(s) as %d order(s)", len(replay_trades), len(orders))
+                send_webhook({"trades": orders})
+                return orders
             log.info("No new fills")
             return []
 
@@ -431,12 +437,14 @@ class PollHandler(BaseHTTPRequestHandler):
         # Read optional JSON body for token/query overrides
         flex_token = None
         flex_query_id = None
+        replay = 0
         content_len = int(self.headers.get("Content-Length", 0))
         if content_len > 0:
             try:
                 body = json.loads(self.rfile.read(content_len))
                 flex_token = body.get("ibkr_flex_token") or None
                 flex_query_id = body.get("ibkr_flex_query_id") or None
+                replay = int(body.get("replay") or 0)
             except (json.JSONDecodeError, Exception):
                 pass  # ignore malformed body, fall back to env vars
 
@@ -444,7 +452,7 @@ class PollHandler(BaseHTTPRequestHandler):
             self._reply(409, {"error": "Poll already in progress"})
             return
         try:
-            orders = poll_once(_db_conn, flex_token=flex_token, flex_query_id=flex_query_id)
+            orders = poll_once(_db_conn, flex_token=flex_token, flex_query_id=flex_query_id, replay=replay)
             result = orders if isinstance(orders, list) else []
             self._reply(200, {"trades": result})
         except Exception as exc:
@@ -507,8 +515,12 @@ def main_once():
         raise SystemExit(1)
 
     debug = "--debug" in sys.argv
+    replay = 0
+    if "--replay" in sys.argv:
+        idx = sys.argv.index("--replay")
+        replay = int(sys.argv[idx + 1]) if idx + 1 < len(sys.argv) else 0
     conn = init_db()
-    orders = poll_once(conn, debug=debug)
+    orders = poll_once(conn, debug=debug, replay=replay)
     conn.close()
     n = len(orders) if isinstance(orders, list) else 0
     print(f"Done — {n} new trade(s) processed")

@@ -25,6 +25,8 @@ def main():
                    help="Run poll via SSH to see full poller logs")
     p.add_argument("--debug", action="store_true",
                    help="Dump raw Flex XML (implies -v)")
+    p.add_argument("--replay", type=int, metavar="N",
+                   help="Resend N trades even if already processed (for testing)")
 
     p = sub.add_parser("test-webhook", help="Send sample trades to webhook endpoint")
     p.add_argument("poller", nargs="?", default="1", choices=["1", "2"],

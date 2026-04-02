@@ -21,11 +21,11 @@ sync: ## Push .env + restart all services (or: make sync S=gateway)
 order: ## Place an order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE])
 	python3 -m cli order $(Q) $(SYM) $(T) $(P) $(CUR) $(EX)
 
-poll: ## Trigger an immediate Flex poll
-	python3 -m cli poll
+poll: ## Trigger an immediate Flex poll (V=1 verbose, DEBUG=1 raw XML, REPLAY=N resend)
+	python3 -m cli poll $(if $(V),-v) $(if $(DEBUG),--debug) $(if $(REPLAY),--replay $(REPLAY))
 
 poll2: ## Trigger an immediate Flex poll (second poller)
-	python3 -m cli poll 2
+	python3 -m cli poll 2 $(if $(V),-v) $(if $(DEBUG),--debug) $(if $(REPLAY),--replay $(REPLAY))
 
 test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2])
 	python3 -m cli test-webhook $(S)

@@ -8,7 +8,8 @@ def run(args):
 
     poller = getattr(args, "poller", "1")
     debug = getattr(args, "debug", False)
-    verbose = getattr(args, "verbose", False) or debug
+    replay = getattr(args, "replay", None)
+    verbose = getattr(args, "verbose", False) or debug or replay is not None
 
     if poller == "2":
         if not validate_poller_env("_2"):
@@ -32,7 +33,10 @@ def run(args):
         cmd = f"cd /opt/ibkr-relay && docker compose exec {service} python poller.py --once"
         if debug:
             cmd += " --debug"
+        if replay is not None:
+            cmd += f" --replay {replay}"
         ssh_cmd(ip, cmd)
     else:
-        data = relay_api(endpoint)
+        body = {"replay": replay} if replay is not None else None
+        data = relay_api(endpoint, data=body)
         print(json.dumps(data, indent=4))
