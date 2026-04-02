@@ -210,22 +210,7 @@
         });
         return false;
       }
-      function sendCtrlAltDel() {
-        rfb.sendCtrlAltDel();
-        return false;
-      }
-      function machineShutdown() {
-        rfb.machineShutdown();
-        return false;
-      }
-      function machineReboot() {
-        rfb.machineReboot();
-        return false;
-      }
-      function machineReset() {
-        rfb.machineReset();
-        return false;
-      }
+
       var STATUS_CLASSES = {
         normal:
           "fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-2 bg-gray-900 text-white shadow-lg text-sm font-mono",
@@ -241,7 +226,6 @@
       }
 
       function connected(e) {
-        document.getElementById("sendCtrlAltDelButton").disabled = false;
         if (
           WebUtil.getConfigVar("encrypt", window.location.protocol === "https:")
         ) {
@@ -252,30 +236,83 @@
       }
 
       function disconnected(e) {
-        document.getElementById("sendCtrlAltDelButton").disabled = true;
-        updatePowerButtons();
         if (e.detail.clean) {
           status("Disconnected", "normal");
         } else {
-          status("Something went wrong, connection is closed", "error");
+          showStartGateway();
         }
       }
 
-      function updatePowerButtons() {
-        var powerbuttons;
-        powerbuttons = document.getElementById("noVNC_power_buttons");
-        if (rfb.capabilities.power) {
-          powerbuttons.className = "noVNC_shown";
-        } else {
-          powerbuttons.className = "noVNC_hidden";
-        }
+      function showStartGateway() {
+        var bar = document.getElementById("noVNC_status_bar");
+        bar.className = STATUS_CLASSES["warn"];
+        var statusEl = document.getElementById("noVNC_status");
+        statusEl.innerHTML = "";
+
+        var form = document.createElement("form");
+        form.className = "flex items-center justify-center gap-3";
+        form.innerHTML =
+          '<span class="text-yellow-300 font-semibold text-sm">Gateway is not running.</span>' +
+          '<input type="password" id="gateway_password" placeholder="VNC Password" class="px-3 py-1.5 rounded bg-gray-800 border border-gray-600 text-white text-sm focus:outline-none focus:border-green-400 focus:ring-1 focus:ring-green-400 w-48" />' +
+          '<button type="submit" id="startGatewayBtn" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded cursor-pointer transition">Start Gateway</button>';
+        form.onsubmit = function () {
+          var pwd = document.getElementById("gateway_password").value;
+          var btn = document.getElementById("startGatewayBtn");
+          if (!pwd) return false;
+          btn.disabled = true;
+          btn.textContent = "Starting…";
+          btn.className =
+            "px-3 py-1.5 bg-gray-600 text-white text-xs font-semibold rounded opacity-60";
+          fetch("/gateway/cgi-bin/start-gateway", { method: "POST" })
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (data) {
+              if (data.status === "started") {
+                status("Gateway started — connecting…", "normal");
+                setTimeout(function () {
+                  reconnect(pwd);
+                }, 5000);
+              } else {
+                status("Failed to start: " + data.detail, "error");
+              }
+            })
+            .catch(function () {
+              status("Failed to reach gateway controller", "error");
+            });
+          return false;
+        };
+        statusEl.appendChild(form);
       }
 
-      document.getElementById("sendCtrlAltDelButton").onclick = sendCtrlAltDel;
-      document.getElementById("machineShutdownButton").onclick =
-        machineShutdown;
-      document.getElementById("machineRebootButton").onclick = machineReboot;
-      document.getElementById("machineResetButton").onclick = machineReset;
+      function reconnect(pwd) {
+        if (rfb) {
+          rfb.removeEventListener("connect", connected);
+          rfb.removeEventListener("disconnect", disconnected);
+          rfb.removeEventListener("credentialsrequired", credentials);
+          rfb.removeEventListener("desktopname", updateDesktopName);
+        }
+        var encrypt = WebUtil.getConfigVar(
+          "encrypt",
+          window.location.protocol === "https:",
+        );
+        var url = (encrypt ? "wss" : "ws") + "://" + host;
+        if (port) url += ":" + port;
+        url += "/" + path;
+
+        rfb = new RFB(document.body, url, {
+          repeaterID: WebUtil.getConfigVar("repeaterID", ""),
+          shared: WebUtil.getConfigVar("shared", true),
+          credentials: { password: pwd },
+        });
+        rfb.viewOnly = WebUtil.getConfigVar("view_only", false);
+        rfb.addEventListener("connect", connected);
+        rfb.addEventListener("disconnect", disconnected);
+        rfb.addEventListener("credentialsrequired", credentials);
+        rfb.addEventListener("desktopname", updateDesktopName);
+        rfb.scaleViewport = WebUtil.getConfigVar("scale", false);
+        rfb.resizeSession = WebUtil.getConfigVar("resize", false);
+      }
 
       WebUtil.init_logging(WebUtil.getConfigVar("logging", "warn"));
       document.title = WebUtil.getConfigVar("title", "noVNC");
@@ -337,9 +374,6 @@
         rfb.viewOnly = WebUtil.getConfigVar("view_only", false);
         rfb.addEventListener("connect", connected);
         rfb.addEventListener("disconnect", disconnected);
-        rfb.addEventListener("capabilities", function () {
-          updatePowerButtons();
-        });
         rfb.addEventListener("credentialsrequired", credentials);
         rfb.addEventListener("desktopname", updateDesktopName);
         rfb.scaleViewport = WebUtil.getConfigVar("scale", false);
@@ -355,37 +389,6 @@
     >
       <div id="noVNC_left_dummy_elem"></div>
       <div id="noVNC_status" class="flex-1 text-center">Loading</div>
-      <div id="noVNC_buttons" class="flex items-center gap-2">
-        <input
-          type="button"
-          value="Send CtrlAltDel"
-          id="sendCtrlAltDelButton"
-          class="noVNC_shown px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed"
-        />
-        <span
-          id="noVNC_power_buttons"
-          class="noVNC_hidden flex items-center gap-2"
-        >
-          <input
-            type="button"
-            value="Shutdown"
-            id="machineShutdownButton"
-            class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold rounded cursor-pointer transition"
-          />
-          <input
-            type="button"
-            value="Reboot"
-            id="machineRebootButton"
-            class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold rounded cursor-pointer transition"
-          />
-          <input
-            type="button"
-            value="Reset"
-            id="machineResetButton"
-            class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold rounded cursor-pointer transition"
-          />
-        </span>
-      </div>
     </div>
   </body>
 </html>

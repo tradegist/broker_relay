@@ -1,4 +1,4 @@
-.PHONY: deploy destroy pause resume sync order poll logs stats ssh help
+.PHONY: deploy destroy pause resume sync order poll logs stats gateway ssh help
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
@@ -31,6 +31,10 @@ logs: ## Stream poller logs (Ctrl+C to stop)
 stats: ## Show container resource usage
 	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP \
 		'docker stats --no-stream'
+
+gateway: ## Start IB Gateway container (then open VNC for 2FA)
+	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP \
+		'cd /opt/ibkr-relay && docker compose up -d ib-gateway && sleep 2 && docker compose ps ib-gateway'
 
 ssh: ## SSH into the droplet
 	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP

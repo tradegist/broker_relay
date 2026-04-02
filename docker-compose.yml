@@ -3,12 +3,11 @@ name: ibkr-relay
 services:
   ib-gateway:
     image: ghcr.io/gnzsnz/ib-gateway:stable
-    restart: always
+    restart: on-failure
     env_file: .env
     environment:
-      TWOFA_TIMEOUT_ACTION: restart
-      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
-      AUTO_RESTART_TIME: "11:59 PM"
+      TWOFA_TIMEOUT_ACTION: exit
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "no"
       EXISTING_SESSION_DETECTED_ACTION: primary
       READ_ONLY_API: "no"
       TZ: ${TIME_ZONE:-America/New_York}
@@ -73,6 +72,14 @@ services:
       - "8000"
     volumes:
       - poller-data:/data
+
+  gateway-controller:
+    build: ./gateway-controller
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "9000"
 
 volumes:
   poller-data:

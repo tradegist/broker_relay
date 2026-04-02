@@ -33,13 +33,14 @@ One-script deployment of a headless **Interactive Brokers Gateway** with two ser
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Five containers in a single Docker network:
+Six containers in a single Docker network:
 
 - **`ib-gateway`** — [`ghcr.io/gnzsnz/ib-gateway:stable`](https://github.com/gnzsnz/ib-gateway-docker). IBC automates login. VNC on port 5900 (raw), API on 4003 (live) / 4004 (paper).
 - **`novnc`** — [`theasp/novnc`](https://hub.docker.com/r/theasp/novnc). Browser-based VNC proxy for completing 2FA.
 - **`caddy`** — [Caddy 2](https://caddyserver.com/) reverse proxy with automatic HTTPS via Let's Encrypt. Routes traffic to the correct backend based on domain (see [Domains & HTTPS](#domains--https)).
 - **`remote-client`** — Python image connected to IB Gateway via `ib_async`. Exposes an HTTP API (internal port 5000) for placing stock orders, secured with Bearer token authentication.
 - **`poller`** — Python image that polls the IBKR Flex Web Service every 10 minutes for trade confirmations and POSTs new fills to a webhook. Uses SQLite for deduplication. **Does not hold an IBKR session** — trade normally via web/mobile.
+- **`gateway-controller`** — Lightweight Alpine sidecar with Docker CLI. Exposes a CGI endpoint so the noVNC page can start the gateway container from the browser.
 
 ## Domains & HTTPS
 
@@ -197,6 +198,7 @@ All operations are available via `make`. Run `make help` to see the full list:
   make sync        Push .env + restart all services (or: make sync S=gateway)
   make order       Place an order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE])
   make poll        Trigger an immediate Flex poll
+  make gateway     Start IB Gateway container (then open VNC for 2FA)
   make logs        Stream poller logs (Ctrl+C to stop)
   make stats       Show container resource usage
   make ssh         SSH into the droplet
@@ -213,6 +215,7 @@ make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR  # buy European ETF in EUR
 make poll                                      # trigger immediate Flex poll
 make logs                                      # stream poller logs
 make logs S=webhook-relay                      # stream relay logs
+make gateway                                   # start gateway + complete 2FA in browser
 make pause                           # snapshot + delete droplet
 make resume                          # restore from snapshot
 ```
@@ -237,11 +240,15 @@ make resume                          # restore from snapshot
 │   ├── outputs.tf         # Droplet IP, VNC/Trade URLs, SSH key
 │   ├── cloud-init.sh      # Docker install + repo clone (no secrets)
 │   └── env.tftpl          # .env template for file provisioner
-├── docker-compose.yml     # Container orchestration (5 services)
+├── docker-compose.yml     # Container orchestration (6 services)
 ├── caddy/
 │   └── Caddyfile          # Reverse proxy config (VNC + Trade domains)
 ├── novnc/
-│   └── index.html         # VNC web client
+│   └── index.html         # VNC web client (Start Gateway button)
+├── gateway-controller/
+│   ├── Dockerfile
+│   ├── start-gateway.sh   # CGI script to start ib-gateway
+│   └── gateway-status.sh  # CGI script to check ib-gateway status
 ├── remote-client/
 │   ├── Dockerfile
 │   ├── requirements.txt   # ib_async, aiohttp
@@ -277,6 +284,27 @@ Before deploying, create an Activity Flex Query in IBKR Client Portal:
 8. Go to **Flex Web Service Configuration** → enable and get the **Current Token** (use as `IBKR_FLEX_TOKEN`)
 
 > **Why Activity instead of Trade Confirmation?** Trade Confirmation queries are locked to "Today" only. Activity queries support a configurable lookback period, so if the droplet is offline for a few days the first poll after restart will catch all missed fills. The SQLite dedup prevents double-sending.
+
+## Gateway Management
+
+The IB Gateway session stays alive for approximately **one week** before IBKR forces re-authentication (2FA). You can safely **close the gateway** when you're not actively using the API — this lets you log in to the [IBKR Client Portal](https://portal.interactivebrokers.com) or mobile app normally (IBKR only allows one active session per user).
+
+When you need the API again, restart the gateway using either method:
+
+**From the command line:**
+
+```bash
+make gateway    # starts the container, then open vnc.example.com for 2FA
+```
+
+**From the browser:**
+
+1. Go to `vnc.example.com`
+2. The page detects the gateway is down and shows a **password field + Start Gateway** button
+3. Enter the VNC password and click **Start Gateway**
+4. The gateway starts and the VNC session connects automatically — complete 2FA when prompted
+
+If 2FA times out before you complete it, the gateway exits cleanly and stops (it will **not** restart in a loop). Use either method above to try again.
 
 ## Placing Orders
 
@@ -432,7 +460,7 @@ make logs S=webhook-relay
 ## Current Status
 
 - [x] Terraform infrastructure (droplet, firewall, SSH key)
-- [x] Docker Compose orchestration (5 containers)
+- [x] Docker Compose orchestration (6 containers)
 - [x] Remote client connected to IB Gateway
 - [x] HTTP API for order placement (US + international stocks/ETFs)
 - [x] Flex poller with SQLite dedup + webhook delivery
@@ -443,4 +471,5 @@ make logs S=webhook-relay
 - [x] Webhook endpoint (HMAC-SHA256 signed, batched payloads)
 - [x] HTTPS via Caddy + Let's Encrypt (separate VNC/Trade domains)
 - [x] Makefile CLI (`make deploy`, `make order`, etc.)
+- [x] Gateway management (browser Start Gateway button + `make gateway`)
 - [ ] Health monitoring / alerting
