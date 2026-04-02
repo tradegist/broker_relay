@@ -46,6 +46,16 @@ export TF_VAR_poll_interval="${POLL_INTERVAL_SECONDS:-600}"
 export TF_VAR_time_zone="${TIME_ZONE:-America/New_York}"
 export TF_VAR_java_heap_size="${JAVA_HEAP_SIZE:-768}"
 
+# Activate poller-2 profile if configured
+source "$(dirname "$0")/poller2-profile.sh"
+
+# Export poller-2 vars for Terraform (optional)
+export TF_VAR_flex_token_2="${IBKR_FLEX_TOKEN_2:-}"
+export TF_VAR_flex_query_id_2="${IBKR_FLEX_QUERY_ID_2:-}"
+export TF_VAR_webhook_url_2="${TARGET_WEBHOOK_URL_2:-}"
+export TF_VAR_webhook_secret_2="${WEBHOOK_SECRET_2:-}"
+export TF_VAR_poll_interval_2="${POLL_INTERVAL_SECONDS_2:-600}"
+
 # Run Terraform
 cd terraform
 terraform init -input=false

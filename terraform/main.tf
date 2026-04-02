@@ -97,6 +97,11 @@ resource "digitalocean_droplet" "relay" {
       vnc_domain     = var.vnc_domain
       trade_domain   = var.trade_domain
       api_token      = var.api_token
+      flex_token_2   = var.flex_token_2
+      flex_query_id_2 = var.flex_query_id_2
+      webhook_url_2  = var.webhook_url_2
+      webhook_secret_2 = var.webhook_secret_2
+      poll_interval_2 = var.poll_interval_2
     })
     destination = "/opt/ibkr-relay/.env"
   }
@@ -104,7 +109,7 @@ resource "digitalocean_droplet" "relay" {
   # Start the stack
   provisioner "remote-exec" {
     inline = [
-      "cd /opt/ibkr-relay && docker compose up -d",
+      "cd /opt/ibkr-relay && COMPOSE_PROFILES=$(grep -q '^IBKR_FLEX_TOKEN_2=' .env && echo poller2 || echo '') docker compose up -d",
     ]
   }
 }

@@ -16,6 +16,9 @@ SSH_KEY="${SSH_KEY:-$HOME/.ssh/ibkr-relay}"
 DROPLET_IP="${DROPLET_IP:?Set DROPLET_IP in .env or environment}"
 REMOTE_DIR="/opt/ibkr-relay"
 
+# Activate poller-2 profile if configured
+source "$SCRIPT_DIR/poller2-profile.sh"
+
 echo "Pushing .env to droplet..."
 scp -i "$SSH_KEY" "$SCRIPT_DIR/.env" "root@${DROPLET_IP}:${REMOTE_DIR}/.env"
 
@@ -23,7 +26,7 @@ if [[ $# -eq 0 ]]; then
   # No args: restart all services
   echo "Restarting all services..."
   ssh -i "$SSH_KEY" "root@${DROPLET_IP}" \
-    "cd ${REMOTE_DIR} && docker compose up -d --force-recreate"
+    "cd ${REMOTE_DIR} && COMPOSE_PROFILES='${COMPOSE_PROFILES:-}' docker compose up -d --force-recreate"
 else
   # Map friendly names to docker-compose service names
   declare -A SERVICE_MAP=(
@@ -35,6 +38,8 @@ else
     [relay]=webhook-relay
     [webhook-relay]=webhook-relay
     [poller]=poller
+    [poller2]=poller-2
+    [poller-2]=poller-2
   )
 
   SERVICES=()
@@ -50,7 +55,7 @@ else
 
   echo "Restarting: ${SERVICES[*]}..."
   ssh -i "$SSH_KEY" "root@${DROPLET_IP}" \
-    "cd ${REMOTE_DIR} && docker compose up -d --force-recreate ${SERVICES[*]}"
+    "cd ${REMOTE_DIR} && COMPOSE_PROFILES='${COMPOSE_PROFILES:-}' docker compose up -d --force-recreate ${SERVICES[*]}"
 fi
 
 echo "Done."

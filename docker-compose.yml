@@ -74,6 +74,23 @@ services:
     volumes:
       - poller-data:/data
 
+  poller-2:
+    build: ./poller
+    restart: always
+    profiles: ["poller2"]
+    environment:
+      IBKR_FLEX_TOKEN: ${IBKR_FLEX_TOKEN_2:?Set IBKR_FLEX_TOKEN_2 in .env}
+      IBKR_FLEX_QUERY_ID: ${IBKR_FLEX_QUERY_ID_2:?Set IBKR_FLEX_QUERY_ID_2 in .env}
+      TARGET_WEBHOOK_URL: ${TARGET_WEBHOOK_URL_2:-}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET_2:?Set WEBHOOK_SECRET_2 in .env}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS_2:-600}
+      API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
+      DB_PATH: /data/poller.db
+    expose:
+      - "8000"
+    volumes:
+      - poller-2-data:/data
+
   gateway-controller:
     build: ./gateway-controller
     restart: always
@@ -84,5 +101,6 @@ services:
 
 volumes:
   poller-data:
+  poller-2-data:
   caddy-data:
   caddy-config:

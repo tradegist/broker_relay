@@ -23,6 +23,9 @@ fi
 set -a; source "$SCRIPT_DIR/.env"; set +a
 source "$STATE_FILE"
 
+# Activate poller-2 profile if configured
+source "$SCRIPT_DIR/poller2-profile.sh"
+
 DO_TOKEN="${DO_API_TOKEN:?Set DO_API_TOKEN in .env}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/ibkr-relay}"
 API="https://api.digitalocean.com/v2"
@@ -121,7 +124,7 @@ for i in $(seq 1 10); do
 done
 
 ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@${RESERVED_IP}" \
-  "cd /opt/ibkr-relay && docker compose up -d --force-recreate" 2>&1 | tail -5
+  "cd /opt/ibkr-relay && COMPOSE_PROFILES='${COMPOSE_PROFILES:-}' docker compose up -d --force-recreate" 2>&1 | tail -5
 
 # ---------------------------------------------------------------------------
 # 5. Delete the snapshot (droplet is running, no longer needed)

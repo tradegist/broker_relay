@@ -1,4 +1,4 @@
-.PHONY: deploy destroy pause resume sync order poll logs stats gateway ssh help
+.PHONY: deploy destroy pause resume sync order poll poll2 logs stats gateway ssh help
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
@@ -23,6 +23,9 @@ order: ## Place an order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=
 
 poll: ## Trigger an immediate Flex poll
 	./poll-now.sh
+
+poll2: ## Trigger an immediate Flex poll (second poller)
+	./poll-now.sh 2
 
 logs: ## Stream poller logs (Ctrl+C to stop)
 	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP \

@@ -95,3 +95,38 @@ variable "api_token" {
   type        = string
   sensitive   = true
 }
+
+# --- Second Poller (optional) ---
+
+variable "flex_token_2" {
+  description = "IBKR Flex token for second poller (optional)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "flex_query_id_2" {
+  description = "Flex Query ID for second poller (optional)"
+  type        = string
+  default     = ""
+}
+
+variable "webhook_url_2" {
+  description = "Webhook URL for second poller (optional)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "webhook_secret_2" {
+  description = "HMAC secret for second poller (optional)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "poll_interval_2" {
+  description = "Poll interval for second poller (optional)"
+  type        = string
+  default     = "600"
+}
