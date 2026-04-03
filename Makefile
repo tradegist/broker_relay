@@ -1,4 +1,4 @@
-.PHONY: setup deploy destroy pause resume sync order poll poll2 test-webhook types typecheck logs stats gateway ssh help
+.PHONY: setup deploy destroy pause resume sync order poll poll2 test-webhook types test typecheck logs stats gateway ssh help
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
@@ -37,6 +37,9 @@ types: ## Regenerate TypeScript types from Pydantic models
 	python3 models.py > types/webhook-payload.schema.json
 	npx --yes json-schema-to-typescript types/webhook-payload.schema.json > types/webhook-payload.d.ts
 	@echo "Generated types/webhook-payload.d.ts"
+
+test: ## Run unit tests
+	PYTHONPATH=. python3 -m pytest poller/ -v
 
 typecheck: ## Run mypy strict type checking
 	python3 -m mypy models.py poller/ cli/test_webhook.py

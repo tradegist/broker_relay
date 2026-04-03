@@ -174,7 +174,7 @@ JAVA_HEAP_SIZE=4096
 # 1. Clone and configure
 git clone https://github.com/OWNER/ibkr_relay.git
 cd ibkr_relay
-make setup        # Install dev dependencies (mypy, pydantic)
+make setup        # Install dev dependencies (mypy, pydantic, pytest)
 cp .env.example .env
 # Edit .env with your values
 
@@ -301,6 +301,8 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make order       Place an order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE])
   make poll        Trigger an immediate Flex poll (V=1 verbose, DEBUG=1 XML, REPLAY=N resend)
   make test-webhook Send sample trades to webhook endpoint
+  make test         Run unit tests (pytest)
+  make typecheck    Run mypy strict type checking
   make gateway     Start IB Gateway container (then open VNC for 2FA)
   make logs        Stream poller logs (Ctrl+C to stop)
   make stats       Show container resource usage
@@ -337,6 +339,8 @@ make poll DEBUG=1                              # dump raw Flex XML
 make poll REPLAY=3                             # resend 3 trades (skip dedup)
 make test-webhook                              # send 3 sample trades to webhook
 make test-webhook S=2                          # send to second webhook
+make test                                      # run unit tests
+make typecheck                                 # strict mypy checking
 make logs                                      # stream poller logs
 make logs S=webhook-relay                      # stream relay logs
 make logs S=ib-gateway                         # stream gateway logs
@@ -648,6 +652,9 @@ The poller supports both **Activity Flex Queries** (`<Trade>` tags) and **Trade 
   | `orderId`            | `ibOrderID`             | `orderID`                    |
   | `transactionId`      | `transactionID`         | —                            |
   | `ibExecId`           | `ibExecID`              | `execID`                     |
+  | `taxes`              | `taxes`                 | `tax`                        |
+  | `settleDateTarget`   | `settleDateTarget`      | `settleDate`                 |
+  | `tradeMoney`         | `tradeMoney`            | `amount`                     |
 
 - **All known fields are forwarded as-is** from the XML. The full list of supported fields is defined in [`models.py`](models.py). Unknown XML attributes are silently dropped but reported in the `errors` array of the webhook payload.
 
