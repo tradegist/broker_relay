@@ -20,7 +20,7 @@
 - **Run `make test` before assuming work is done and before copying ANY file to the droplet.** If tests fail, fix them first. Never deploy untested code.
 - **Run `make test` and `make typecheck` after every code change**, even refactors. Do not wait until the end — verify immediately.
 - When modifying any Python file (`.py`), always run `make test` and `make typecheck` and confirm both pass before deploying.
-- After modifying any model in `models.py`, also run `make types` to regenerate the TypeScript definitions.
+- After modifying any model in `poller/models.py`, also run `make types` to regenerate the TypeScript definitions.
 - **Always verify type safety by breaking it first.** After any refactor that touches types or model construction, deliberately introduce a type error (e.g. pass a `str` where `float` is expected), run `make typecheck`, and confirm it **fails**. Then revert and confirm it passes. Never assume mypy catches something — prove it.
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)` — mypy cannot type-check `**dict[str, Any]`. Use explicit keyword arguments or `model_copy(update=...)` instead.
 
@@ -94,9 +94,10 @@ The `remote-client/` service is organized into packages:
 ```
 remote-client/
   main.py                  # Entrypoint (connection + HTTP server)
+  models.py                # Pydantic request/response models (order API)
   client/                  # IB Gateway client (namespace delegation)
     __init__.py            # IBClient class (connection management)
-    orders.py              # OrdersNamespace: place()
+    orders.py              # OrdersNamespace: place(contract_req, order_req)
   routes/                  # HTTP route handlers
     __init__.py            # Orchestrator: create_routes()
     middlewares.py         # Auth middleware (Bearer token)
@@ -108,13 +109,52 @@ remote-client/
 ```
 
 - **One file per route** — easy to find and scale.
-- **Namespace delegation for IBClient** — `client.orders.place(...)`. Add new namespaces (e.g. `holdings.py`, `quotes.py`) as needed.
+- **Namespace delegation for IBClient** — `client.orders.place(contract_req, order_req)`. Add new namespaces (e.g. `holdings.py`, `quotes.py`) as needed.
 - **Route handlers access the client via `request.app["client"]`**, not closures.
+
+## Models (Two Separate Files)
+
+This project has **two independent `models.py` files** — they serve different concerns and share no code:
+
+| File                      | Domain                      | Contains                                                                                 |
+| ------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
+| `poller/models.py`        | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                 |
+| `remote-client/models.py` | Order API (inbound)         | `ContractRequest`, `OrderRequest`, `PlaceOrderRequest`, `OrderResponse` — REST API types |
+
+- `poller/models.py` is the source of truth for TypeScript types (`make types`).
+- `remote-client/models.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
+- Both use `ConfigDict(extra="forbid")` for strict validation.
+
+## Order API Payload
+
+The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrder(contract, order)`:
+
+```json
+{
+  "contract": {
+    "symbol": "TSLA",
+    "secType": "STK",
+    "exchange": "SMART",
+    "currency": "USD"
+  },
+  "order": {
+    "action": "BUY",
+    "totalQuantity": 2,
+    "orderType": "LMT",
+    "lmtPrice": 150.0
+  }
+}
+```
+
+- Field names match `ib_async` exactly (e.g. `lmtPrice`, `totalQuantity`, `secType`, `tif`, `outsideRth`).
+- `contract.secType` defaults to `"STK"`, `contract.exchange` to `"SMART"`, `contract.currency` to `"USD"`.
+- `order.tif` defaults to `"DAY"`, `order.outsideRth` to `false`.
+- Pydantic validates the full request; invalid payloads return 400 with structured error details.
 
 ## TypeScript Types
 
 - Types are published as `@tradegist/ibkr-types` (npm package in `types/`, not yet published).
-- **`make types`** regenerates `types/webhook.d.ts` and `types/webhook.schema.json` from `models.py`.
+- **`make types`** regenerates `types/webhook.d.ts` and `types/webhook.schema.json` from `poller/models.py`.
 - `types/index.d.ts` is the barrel file re-exporting all types.
 
 ## Code Style
@@ -165,6 +205,7 @@ cli/                    # Python CLI (operator scripts)
 caddy/Caddyfile         # Reverse proxy config (uses env vars for domains)
 remote-client/          # webhook-relay service (see Remote Client Structure above)
 poller/                 # Flex poller service (Python, httpx)
+  models.py             # Pydantic models: Fill, Trade, WebhookPayload, BuySell
 gateway-controller/     # CGI sidecar (Alpine, busybox httpd)
 novnc/index.html        # Custom VNC UI (Tailwind CSS)
 types/                  # @tradegist/ibkr-types npm package

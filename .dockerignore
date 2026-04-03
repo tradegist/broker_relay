@@ -4,7 +4,7 @@
 
 # Poller build needs these:
 
-!models.py
+!poller/models.py
 !poller/requirements.txt
 !poller/flex_parser.py
 !poller/poller.py

@@ -34,15 +34,15 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 	python3 -m cli test-webhook $(S)
 
 types: ## Regenerate TypeScript types from Pydantic models
-	python3 models.py > types/webhook.schema.json
+	python3 poller/models.py > types/webhook.schema.json
 	npx --yes json-schema-to-typescript types/webhook.schema.json > types/webhook.d.ts
 	@echo "Generated types/webhook.d.ts"
 
 test: ## Run unit tests
-	PYTHONPATH=. python3 -m pytest poller/ -v
+	PYTHONPATH=.:poller python3 -m pytest poller/ -v
 
 typecheck: ## Run mypy strict type checking
-	python3 -m mypy models.py poller/ cli/test_webhook.py
+	MYPYPATH=poller python3 -m mypy poller/ cli/test_webhook.py
 
 E2E_ENV = remote-client/tests/e2e/.env.test
 E2E_COMPOSE = docker compose -f docker-compose.test.yml --env-file $(E2E_ENV)

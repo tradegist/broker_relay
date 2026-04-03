@@ -4,22 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 
-from ib_async import IB, LimitOrder, MarketOrder, Stock
+from ib_async import IB, Contract, LimitOrder, MarketOrder
+
+from models import ContractRequest, OrderRequest, OrderResponse
 
 log = logging.getLogger("ib-client")
-
-
-@dataclass
-class OrderResult:
-    status: str
-    order_id: int
-    action: str
-    symbol: str
-    quantity: int
-    order_type: str
-    limit_price: float | None = None
 
 
 class OrdersNamespace:
@@ -30,65 +20,70 @@ class OrdersNamespace:
 
     async def place(
         self,
-        symbol: str,
-        quantity: int,
-        order_type: str,
-        limit_price: float | None = None,
-        exchange: str = "SMART",
-        currency: str = "USD",
-    ) -> OrderResult:
-        """Place a stock order and return the result.
+        contract_req: ContractRequest,
+        order_req: OrderRequest,
+    ) -> OrderResponse:
+        """Place an order and return the result.
 
         Raises ValueError for invalid input, RuntimeError for IB errors.
         """
-        if quantity == 0:
-            raise ValueError("quantity cannot be zero")
-        if not symbol:
-            raise ValueError("symbol is required")
+        if order_req.orderType == "LMT" and order_req.lmtPrice is None:
+            raise ValueError("lmtPrice required for LMT orders")
 
-        action = "BUY" if quantity > 0 else "SELL"
-        abs_qty = abs(quantity)
-
-        if order_type == "LMT":
-            if limit_price is None:
-                raise ValueError("limitPrice required for LMT orders")
-            order = LimitOrder(action, abs_qty, limit_price)
-        elif order_type == "MKT":
-            order = MarketOrder(action, abs_qty)
+        if order_req.orderType == "LMT":
+            ib_order = LimitOrder(
+                order_req.action,
+                order_req.totalQuantity,
+                order_req.lmtPrice,
+            )
         else:
-            raise ValueError(f"Unsupported orderType: {order_type}")
+            ib_order = MarketOrder(order_req.action, order_req.totalQuantity)
 
-        contract = Stock(symbol, exchange, currency)
+        ib_order.tif = order_req.tif
+        ib_order.outsideRth = order_req.outsideRth
+
+        ib_contract = Contract(
+            symbol=contract_req.symbol,
+            secType=contract_req.secType,
+            exchange=contract_req.exchange,
+            currency=contract_req.currency,
+            primaryExchange=contract_req.primaryExchange,
+        )
 
         try:
-            qualified = await self._ib.qualifyContractsAsync(contract)
+            qualified = await self._ib.qualifyContractsAsync(ib_contract)
             if not qualified:
-                raise ValueError(f"Could not qualify contract for {symbol}")
+                raise ValueError(
+                    f"Could not qualify contract for {contract_req.symbol}"
+                )
         except ValueError:
             raise
         except Exception as exc:
             raise RuntimeError(f"Contract qualification failed: {exc}") from exc
 
         log.info(
-            "Placing order: %s %d %s %s%s",
-            action, abs_qty, symbol, order_type,
-            f" @ {limit_price}" if order_type == "LMT" else "",
+            "Placing order: %s %.4g %s %s%s",
+            order_req.action,
+            order_req.totalQuantity,
+            contract_req.symbol,
+            order_req.orderType,
+            f" @ {order_req.lmtPrice}" if order_req.orderType == "LMT" else "",
         )
 
         try:
-            trade = self._ib.placeOrder(contract, order)
+            trade = self._ib.placeOrder(ib_contract, ib_order)
         except Exception as exc:
             raise RuntimeError(f"Order placement failed: {exc}") from exc
 
         # Give IBKR a moment to acknowledge
         await asyncio.sleep(1)
 
-        return OrderResult(
+        return OrderResponse(
             status=trade.orderStatus.status,
-            order_id=trade.order.orderId,
-            action=action,
-            symbol=symbol,
-            quantity=abs_qty,
-            order_type=order_type,
-            limit_price=limit_price if order_type == "LMT" else None,
+            orderId=trade.order.orderId,
+            action=order_req.action,
+            symbol=contract_req.symbol,
+            totalQuantity=order_req.totalQuantity,
+            orderType=order_req.orderType,
+            lmtPrice=order_req.lmtPrice if order_req.orderType == "LMT" else None,
         )
