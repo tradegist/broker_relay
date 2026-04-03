@@ -162,9 +162,14 @@ def aggregate_fills(fills: list[Fill]) -> list[Trade]:
         last = order_fills[-1]
         last_dt = max(f.dateTime for f in order_fills) if order_fills else ""
 
-        # Build Trade from last fill's values, then override aggregated fields
-        data = last.model_dump()
-        data.update(
+        # Build Trade from last fill's values, overriding aggregated fields.
+        # Use model_copy() to preserve type safety (model_dump() returns
+        # dict[str, Any] which defeats mypy checking).
+        trades.append(Trade(
+            **{
+                field: getattr(last, field)
+                for field in Fill.model_fields
+            },
             quantity=total_quantity,
             price=round(avg_price, 8),
             commission=round(total_commission, 4),
@@ -180,7 +185,6 @@ def aggregate_fills(fills: list[Fill]) -> list[Trade]:
             tradeDate=max(f.tradeDate for f in order_fills),
             execIds=[_dedup_id(f) for f in order_fills],
             fillCount=len(order_fills),
-        )
-        trades.append(Trade(**data))
+        ))
 
     return trades

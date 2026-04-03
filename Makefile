@@ -39,7 +39,7 @@ types: ## Regenerate TypeScript types from Pydantic models
 	@echo "Generated types/webhook-payload.d.ts"
 
 typecheck: ## Run mypy strict type checking
-	python3 -m mypy models.py poller/poller.py cli/test_webhook.py
+	python3 -m mypy models.py poller/ cli/test_webhook.py
 
 logs: ## Stream poller logs (Ctrl+C to stop)
 	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/ibkr-relay} root@$$DROPLET_IP \
