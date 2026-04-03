@@ -11,13 +11,14 @@
 - **No hardcoded domains** — use `example.com` variants (`vnc.example.com`, `trade.example.com`) in docs and code. Actual domains are loaded at runtime via `VNC_DOMAIN` / `TRADE_DOMAIN` env vars.
 - **No email addresses or personal info** — never write real names, emails, or account IDs in committed files. Use `UXXXXXXX` for IBKR account examples.
 - **No logging of secrets** — never `log.info()` or `print()` tokens, passwords, or API keys. Log actions and outcomes, not credential values.
-- **`.env` and `*.tfvars` are gitignored** — never commit them. Use `.env.example` with placeholder values as reference.
+- **`.env`, `*.tfvars`, and `.env.test` are gitignored** — never commit them. Use `.env.example` / `.env.test.example` with placeholder values as reference.
 - **Terraform state is gitignored** — `terraform.tfstate` contains SSH keys and IPs. Never commit it.
 
 ## Type Safety (MANDATORY)
 
 - **Run `make typecheck` before copying ANY Python file to the droplet.** This is non-negotiable. If mypy fails, do NOT push the code.
 - **Run `make test` before assuming work is done and before copying ANY file to the droplet.** If tests fail, fix them first. Never deploy untested code.
+- **Run `make test` and `make typecheck` after every code change**, even refactors. Do not wait until the end — verify immediately.
 - When modifying any Python file (`.py`), always run `make test` and `make typecheck` and confirm both pass before deploying.
 - After modifying any model in `models.py`, also run `make types` to regenerate the TypeScript definitions.
 - **Always verify type safety by breaking it first.** After any refactor that touches types or model construction, deliberately introduce a type error (e.g. pass a `str` where `float` is expected), run `make typecheck`, and confirm it **fails**. Then revert and confirm it passes. Never assume mypy catches something — prove it.
@@ -75,6 +76,47 @@ Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses
 - `restart: on-failure` — Docker restarts only on crashes, not clean exits.
 - Sessions last ~1 week before IBKR forces re-authentication.
 
+## E2E Testing
+
+- **E2E tests run against a local Docker stack** with a real IB Gateway connected to a paper trading account. Real orders are placed in paper mode.
+- **Credentials live in `remote-client/tests/e2e/.env.test`** (gitignored). Template: `.env.test.example`.
+- **`docker-compose.test.yml`** at project root defines the test stack (ib-gateway + webhook-relay only, no Caddy/poller/VNC).
+- **`make e2e`** starts the stack, waits for connection, runs pytest, then tears down. Always cleans up, even on test failure.
+- **`make e2e-up` / `make e2e-down`** for manual stack management during debugging.
+- **Test API runs on `localhost:15000`** with hardcoded token `test-token`.
+- **No healthcheck on `ib-gateway`** — the `IBClient.connect()` handles retry with exponential backoff, same as production.
+- **Paper accounts require no 2FA**, so the E2E stack is fully automated.
+
+## Remote Client Structure
+
+The `remote-client/` service is organized into packages:
+
+```
+remote-client/
+  main.py                  # Entrypoint (connection + HTTP server)
+  client/                  # IB Gateway client (namespace delegation)
+    __init__.py            # IBClient class (connection management)
+    orders.py              # OrdersNamespace: place()
+  routes/                  # HTTP route handlers
+    __init__.py            # Orchestrator: create_routes()
+    middlewares.py         # Auth middleware (Bearer token)
+    order_place.py         # POST /ibkr/order
+    handlers.py            # GET /health
+  tests/e2e/               # E2E tests (paper account)
+    conftest.py            # httpx fixtures (api + anon_api)
+    .env.test.example      # Template for paper credentials
+```
+
+- **One file per route** — easy to find and scale.
+- **Namespace delegation for IBClient** — `client.orders.place(...)`. Add new namespaces (e.g. `holdings.py`, `quotes.py`) as needed.
+- **Route handlers access the client via `request.app["client"]`**, not closures.
+
+## TypeScript Types
+
+- Types are published as `@tradegist/ibkr-types` (npm package in `types/`, not yet published).
+- **`make types`** regenerates `types/webhook.d.ts` and `types/webhook.schema.json` from `models.py`.
+- `types/index.d.ts` is the barrel file re-exporting all types.
+
 ## Code Style
 
 - Python: `logging` module, f-strings, `aiohttp` for async HTTP in webhook-relay, `httpx` for sync HTTP in poller.
@@ -93,6 +135,7 @@ make pause     # Snapshot + delete droplet (save costs)
 make resume    # Restore from snapshot
 make poll      # Trigger immediate Flex poll
 make order     # Place an order
+make e2e       # Run E2E tests (paper account)
 ```
 
 Direct CLI (no Make required, works on Windows):
@@ -120,9 +163,11 @@ cli/                    # Python CLI (operator scripts)
   order.py              # Place orders via HTTPS API
   poll.py               # Trigger immediate Flex poll
 caddy/Caddyfile         # Reverse proxy config (uses env vars for domains)
-remote-client/          # webhook-relay service (Python, aiohttp)
+remote-client/          # webhook-relay service (see Remote Client Structure above)
 poller/                 # Flex poller service (Python, httpx)
 gateway-controller/     # CGI sidecar (Alpine, busybox httpd)
 novnc/index.html        # Custom VNC UI (Tailwind CSS)
+types/                  # @tradegist/ibkr-types npm package
+docker-compose.test.yml # E2E test stack
 terraform/              # Infrastructure as code (DigitalOcean)
 ```
