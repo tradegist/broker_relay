@@ -36,6 +36,7 @@ But even with those libraries, you still need to **build a Python app, deploy it
 - [GitHub Actions](#github-actions-fork--deploy)
 - [Project Structure](#project-structure)
 - [Current Status](#current-status)
+- [Flex XML Parsing](#flex-xml-parsing)
 
 ## API Endpoints
 
@@ -240,31 +241,41 @@ All configuration is via environment variables in `.env`:
 
 ## Webhook Payload
 
-When an order fills, the relay POSTs a JSON payload:
+When orders fill, the relay POSTs a JSON payload with all trades batched into a single request:
 
 ```json
 {
-  "event": "fill",
-  "symbol": "AAPL",
-  "underlyingSymbol": "AAPL",
-  "secType": "STK",
-  "exchange": "NYSE",
-  "op": "BUY",
-  "quantity": 100.0,
-  "avgPrice": 178.52,
-  "tradeDate": "2026-04-01",
-  "lastFillTime": "2026-04-01T14:30:00",
-  "orderTime": "2026-04-01T09:31:05",
-  "orderId": "1116304421",
-  "execIds": ["5663526621", "5663526623"],
-  "account": "UXXXXXXX",
-  "commission": -1.0,
-  "commissionCurrency": "USD",
-  "currency": "USD",
-  "orderType": "LMT",
-  "fillCount": 2
+  "trades": [
+    {
+      "accountId": "UXXXXXXX",
+      "symbol": "AAPL",
+      "underlyingSymbol": "AAPL",
+      "assetCategory": "STK",
+      "listingExchange": "NASDAQ",
+      "exchange": "IBDARK",
+      "buySell": "BUY",
+      "quantity": 1.0,
+      "price": 254.6,
+      "tradeDate": "20260402",
+      "dateTime": "20260402;093008",
+      "orderTime": "20260401;183713",
+      "orderId": "684196618",
+      "transactionId": "10101388829",
+      "orderType": "MKT",
+      "commission": -1.0,
+      "commissionCurrency": "USD",
+      "currency": "USD",
+      "execIds": ["10101388829"],
+      "fillCount": 1
+    }
+  ],
+  "errors": []
 }
 ```
+
+The `trades` array contains one `Trade` object per order (fills are aggregated by `orderId`). The `errors` array contains warnings about unknown XML attributes or parse errors — it is empty when everything parsed cleanly. See [Flex XML Parsing](#flex-xml-parsing) for details.
+
+Each `Trade` includes **all fields** from the IBKR Flex XML (see [`models.py`](models.py) for the full list). Fields not present in the XML default to `""` or `0.0`.
 
 The payload is signed with HMAC-SHA256. Verify using the `X-Signature-256` header:
 
@@ -385,9 +396,11 @@ After changing a variable in `.env`, restart only the affected service:
 │ ├── Dockerfile
 │ ├── requirements.txt # ib_async, aiohttp
 │ └── client.py # IB Gateway client + authenticated order API
+├── models.py # Pydantic models (Fill, Trade, WebhookPayload)
 └── poller/
 ├── Dockerfile
-├── requirements.txt # httpx
+├── requirements.txt # httpx, pydantic
+├── flex_parser.py # Flex XML parser (Activity + Trade Confirmation)
 └── poller.py # Flex trade poller + webhook sender
 
 ````
@@ -618,4 +631,39 @@ make logs S=ib-gateway
 - [x] HTTPS via Caddy + Let's Encrypt (separate VNC/Trade domains)
 - [x] Makefile CLI (`make deploy`, `make order`, etc.)
 - [x] Gateway management (browser Start Gateway button + `make gateway`)
+- [x] Unified Flex XML parsing (Activity + Trade Confirmation)
 - [ ] Health monitoring / alerting
+
+## Flex XML Parsing
+
+The poller supports both **Activity Flex Queries** (`<Trade>` tags) and **Trade Confirmation Flex Queries** (`<TradeConfirm>` / `<TradeConfirmation>` tags). To handle both formats in a unified way, the parser makes the following assumptions:
+
+- **Field names are normalized** to a single canonical name when IBKR uses different attribute names across formats:
+
+  | Canonical name       | Activity Flex attribute | Trade Confirmation attribute |
+  | -------------------- | ----------------------- | ---------------------------- |
+  | `price`              | `tradePrice`            | `price`                      |
+  | `commission`         | `ibCommission`          | `commission`                 |
+  | `commissionCurrency` | `ibCommissionCurrency`  | `commissionCurrency`         |
+  | `orderId`            | `ibOrderID`             | `orderID`                    |
+  | `transactionId`      | `transactionID`         | —                            |
+  | `ibExecId`           | `ibExecID`              | `execID`                     |
+
+- **All known fields are forwarded as-is** from the XML. The full list of supported fields is defined in [`models.py`](models.py). Unknown XML attributes are silently dropped but reported in the `errors` array of the webhook payload.
+
+- **Fills are aggregated into trades** by `orderId`. When an order has multiple fills:
+  - `quantity` is the sum of all fills
+  - `price` is the quantity-weighted average
+  - Financial fields (`commission`, `taxes`, `cost`, `tradeMoney`, `proceeds`, `netCash`, `fifoPnlRealized`, `mtmPnl`, `accruedInt`) are summed
+  - `dateTime` and `tradeDate` use the latest value across fills
+  - All other fields use the last fill's value
+  - `execIds` is an array of `transactionId` values (one per fill), so you can trace back to individual executions
+  - `fillCount` is the number of fills in the group
+
+- **Deduplication** uses `transactionId` as the primary key (falling back to `ibExecId` → `tradeID`). Processed IDs are stored in SQLite to prevent double-sending across poll cycles.
+
+- **Parse errors never break the runtime.** Malformed rows are skipped and reported in the `errors` array. Bad float values default to `0.0`.
+
+The XML parsing logic lives in [`poller/flex_parser.py`](poller/flex_parser.py).
+
+If you notice any mistakes in the webhook payload or field mapping, please [open a PR](../../pulls).
