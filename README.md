@@ -33,6 +33,8 @@ But even with those libraries, you still need to **build a Python app, deploy it
 - [Commands](#commands)
 - [Pause & Resume](#pause--resume)
 - [Security](#security)
+- [Testing](#testing)
+- [TypeScript Types](#typescript-types)
 - [GitHub Actions](#github-actions-fork--deploy)
 - [Project Structure](#project-structure)
 - [Current Status](#current-status)
@@ -189,6 +191,59 @@ make deploy
 make destroy
 ```
 
+## Testing
+
+### Unit tests
+
+```bash
+make test        # run pytest (poller, parser, models)
+make typecheck   # strict mypy checking
+```
+
+### E2E tests
+
+End-to-end tests run against a local Docker stack with a real IB Gateway connected to a **paper trading account**. Real orders are placed in paper mode.
+
+**Setup:**
+
+1. Copy the template and fill in your paper account credentials:
+
+   ```bash
+   cp remote-client/tests/e2e/.env.test.example remote-client/tests/e2e/.env.test
+   # Edit .env.test with your IBKR paper username and password
+   ```
+
+2. Make sure Docker Desktop is running.
+
+3. Run the tests:
+
+   ```bash
+   make e2e          # start stack → run tests → tear down
+   ```
+
+   Or manage the stack manually:
+
+   ```bash
+   make e2e-up       # start ib-gateway + webhook-relay (paper mode)
+   make e2e-down     # stop and remove containers
+   ```
+
+The test stack exposes the API on `http://localhost:15000` with a hardcoded token (`test-token`). The gateway typically connects within ~20 seconds.
+
+## TypeScript Types
+
+Webhook payload and order placement types are available as a TypeScript package under `types/`:
+
+```
+types/
+  package.json         # @tradegist/ibkr-types
+  index.d.ts           # Barrel export
+  webhook.d.ts         # WebhookPayload, Trade, BuySell (auto-generated from Pydantic models)
+  http_client.ts       # OrderPayload, Operation, OrderType
+```
+
+Types are auto-generated from the Pydantic models via `make types`. The package is not yet published to npm — the API is still evolving.
+
 ## GitHub Actions (Fork & Deploy)
 
 For automated deployment without local Terraform:
@@ -312,6 +367,9 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make test-webhook Send sample trades to webhook endpoint
   make test         Run unit tests (pytest)
   make typecheck    Run mypy strict type checking
+  make e2e          Run E2E tests against local paper account
+  make e2e-up       Start E2E test stack (IB Gateway + webhook-relay)
+  make e2e-down     Stop and remove E2E test stack
   make gateway     Start IB Gateway container (then open VNC for 2FA)
   make logs        Stream poller logs (Ctrl+C to stop)
   make stats       Show container resource usage
@@ -405,8 +463,21 @@ After changing a variable in `.env`, restart only the affected service:
 │ └── gateway-status.sh # CGI script to check ib-gateway status
 ├── remote-client/
 │ ├── Dockerfile
-│ ├── requirements.txt # ib_async, aiohttp
-│ └── client.py # IB Gateway client + authenticated order API
+│   ├── requirements.txt       # ib_async, aiohttp
+│   ├── main.py                # Entrypoint (connection + HTTP server)
+│   ├── client/                # IB Gateway client (namespace delegation)
+│   │   ├── __init__.py        # IBClient class (connection management)
+│   │   └── orders.py          # OrdersNamespace (place orders)
+│   ├── routes/                # HTTP route handlers
+│   │   ├── __init__.py        # Route orchestrator (create_routes)
+│   │   ├── middlewares.py     # Auth middleware (Bearer token)
+│   │   ├── order_place.py     # POST /ibkr/order
+│   │   └── handlers.py        # GET /health
+│   └── tests/e2e/             # E2E tests (paper account)
+│       ├── conftest.py        # httpx fixtures
+│       ├── .env.test.example  # Template for paper credentials
+│       └── .env.test          # Your paper credentials (gitignored)
+├── docker-compose.test.yml    # E2E test stack (ib-gateway + webhook-relay)
 ├── models.py # Pydantic models (Fill, Trade, WebhookPayload)
 └── poller/
 ├── Dockerfile
@@ -643,6 +714,8 @@ make logs S=ib-gateway
 - [x] Makefile CLI (`make deploy`, `make order`, etc.)
 - [x] Gateway management (browser Start Gateway button + `make gateway`)
 - [x] Unified Flex XML parsing (Activity + Trade Confirmation)
+- [x] TypeScript type definitions (`@tradegist/ibkr-types`, not yet published)
+- [x] E2E test infrastructure (Docker-based, paper account)
 - [ ] Health monitoring / alerting
 
 ## Flex XML Parsing
