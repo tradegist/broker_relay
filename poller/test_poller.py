@@ -163,7 +163,7 @@ class TestPruneOld:
 class TestSendWebhook:
     def test_dry_run_no_url(self) -> None:
         """No URL → logs payload, no HTTP call."""
-        payload = WebhookPayload(trades=[_make_trade()])
+        payload = WebhookPayload(trades=[_make_trade()], errors=[])
         with patch("poller.TARGET_WEBHOOK_URL", ""):
             # Should not raise
             send_webhook(payload)
@@ -171,7 +171,7 @@ class TestSendWebhook:
     @patch("poller.httpx.post")
     def test_sends_with_signature(self, mock_post: MagicMock) -> None:
         mock_post.return_value = MagicMock(status_code=200)
-        payload = WebhookPayload(trades=[_make_trade()])
+        payload = WebhookPayload(trades=[_make_trade()], errors=[])
         secret = "test-secret"
 
         with patch("poller.TARGET_WEBHOOK_URL", "https://example.com/hook"), \
@@ -193,7 +193,7 @@ class TestSendWebhook:
     @patch("poller.httpx.post")
     def test_custom_header_sent(self, mock_post: MagicMock) -> None:
         mock_post.return_value = MagicMock(status_code=200)
-        payload = WebhookPayload(trades=[_make_trade()])
+        payload = WebhookPayload(trades=[_make_trade()], errors=[])
 
         with patch("poller.TARGET_WEBHOOK_URL", "https://example.com/hook"), \
              patch("poller.WEBHOOK_SECRET", "s"), \
@@ -209,7 +209,7 @@ class TestSendWebhook:
         """Webhook delivery failure is logged, not raised."""
         import httpx
         mock_post.side_effect = httpx.HTTPError("connection refused")
-        payload = WebhookPayload(trades=[_make_trade()])
+        payload = WebhookPayload(trades=[_make_trade()], errors=[])
 
         with patch("poller.TARGET_WEBHOOK_URL", "https://example.com/hook"), \
              patch("poller.WEBHOOK_SECRET", "s"):

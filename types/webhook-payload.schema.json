@@ -375,7 +375,8 @@
     }
   },
   "required": [
-    "trades"
+    "trades",
+    "errors"
   ],
   "title": "WebhookPayload",
   "type": "object"

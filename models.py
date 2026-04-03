@@ -148,7 +148,7 @@ class WebhookPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     trades: list[Trade]
-    errors: list[str] = Field(default_factory=list)
+    errors: list[str]
 
 
 if __name__ == "__main__":

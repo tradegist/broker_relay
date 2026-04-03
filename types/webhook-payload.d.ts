@@ -7,7 +7,7 @@
 
 export interface WebhookPayload {
   trades: Trade[];
-  errors?: string[];
+  errors: string[];
 }
 /**
  * Aggregated trade — one or more fills grouped by orderId.

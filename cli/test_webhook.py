@@ -91,7 +91,7 @@ def run(args):
     if not secret:
         die(f"WEBHOOK_SECRET{suffix} is not set in .env")
 
-    payload = WebhookPayload(trades=SAMPLE_TRADES)
+    payload = WebhookPayload(trades=SAMPLE_TRADES, errors=[])
     body = payload.model_dump_json(indent=2)
 
     signature = hmac.new(
