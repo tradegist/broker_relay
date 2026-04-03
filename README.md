@@ -383,7 +383,7 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make pause       Snapshot droplet + delete (save costs)
   make resume      Restore droplet from snapshot
   make sync        Push .env + restart all services (or: make sync S=gateway)
-  make order       Place an order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE])
+  make order       Place a stock order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE] [TIF=GTC] [RTH=1])
   make poll        Trigger an immediate Flex poll (V=1 verbose, DEBUG=1 XML, REPLAY=N resend)
   make test-webhook Send sample trades to webhook endpoint
   make test         Run unit tests (pytest)
@@ -564,7 +564,7 @@ If 2FA times out before you complete it, the gateway exits cleanly and stops (it
 
 ## Placing Orders
 
-Place stock orders from your local machine:
+Place stock orders from your local machine. The CLI is a convenience wrapper for `POST /ibkr/order` — it only supports `secType: STK` (stocks/ETFs). For other security types, call the API directly.
 
 ```bash
 # Buy 2 shares of TSLA at market
@@ -584,6 +584,12 @@ python3 -m cli order 10 CSPX LMT 590 EUR
 
 # Buy on a specific exchange
 python3 -m cli order 10 CSPX LMT 590 EUR LSE
+
+# Good-til-cancelled order
+python3 -m cli order 2 TSLA LMT 300 --tif GTC
+
+# Allow execution outside regular trading hours
+python3 -m cli order 2 TSLA LMT 300 --outside-rth
 ```
 
 Or via `make`:
@@ -593,6 +599,8 @@ make order Q=2 SYM=TSLA T=MKT
 make order Q=-2 SYM=TSLA T=LMT P=380
 make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR
 make order Q=10 SYM=CSPX T=LMT P=590 CUR=EUR EX=LSE
+make order Q=2 SYM=TSLA T=LMT P=300 TIF=GTC
+make order Q=2 SYM=TSLA T=LMT P=300 RTH=1
 ```
 
 Positive quantity = **BUY**, negative = **SELL**. The script calls `https://<TRADE_DOMAIN>/ibkr/order` over HTTPS with Bearer token authentication.

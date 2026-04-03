@@ -22,8 +22,8 @@ resume: ## Restore droplet from snapshot
 sync: ## Push .env + restart all services (or: make sync S=gateway)
 	python3 -m cli sync $(S)
 
-order: ## Place an order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE])
-	python3 -m cli order $(Q) $(SYM) $(T) $(P) $(CUR) $(EX)
+order: ## Place a stock order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE] [TIF=GTC] [RTH=1])
+	python3 -m cli order $(Q) $(SYM) $(T) $(P) $(CUR) $(EX) $(if $(TIF),--tif $(TIF)) $(if $(RTH),--outside-rth)
 
 poll: ## Trigger an immediate Flex poll (V=1 verbose, DEBUG=1 raw XML, REPLAY=N resend)
 	python3 -m cli poll $(if $(V),-v) $(if $(DEBUG),--debug) $(if $(REPLAY),--replay $(REPLAY))
