@@ -1,7 +1,5 @@
 """Authentication middleware for the IBKR Remote Client API."""
 
-from __future__ import annotations
-
 import hmac
 import logging
 import os

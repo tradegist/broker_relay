@@ -1,7 +1,5 @@
 """IBKR Flex Poller — core polling logic, SQLite dedup, and webhook delivery."""
 
-from __future__ import annotations
-
 import hashlib
 import hmac
 import logging

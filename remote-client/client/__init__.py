@@ -1,7 +1,5 @@
 """IB Gateway client — connection management and namespace delegation."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os

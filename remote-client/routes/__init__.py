@@ -1,7 +1,5 @@
 """Routes package — assembles middleware, handlers, and route table."""
 
-from __future__ import annotations
-
 from aiohttp import web
 
 from client import IBClient

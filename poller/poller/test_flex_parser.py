@@ -1,7 +1,5 @@
 """Comprehensive tests for poller/flex_parser.py."""
 
-from __future__ import annotations
-
 import pytest
 
 from poller.flex_parser import _dedup_id, aggregate_fills, parse_fills

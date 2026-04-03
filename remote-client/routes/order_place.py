@@ -1,7 +1,5 @@
 """POST /ibkr/order — place an order."""
 
-from __future__ import annotations
-
 import logging
 
 from aiohttp import web

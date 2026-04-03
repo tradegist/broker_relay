@@ -1,7 +1,5 @@
 """Pydantic models for the remote-client REST API (order placement)."""
 
-from __future__ import annotations
-
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -69,3 +67,36 @@ class OrderResponse(BaseModel):
     totalQuantity: float
     orderType: OrderType
     lmtPrice: float | None = None
+
+
+if __name__ == "__main__":
+    import json
+    import sys
+
+    # Combine request + response into a single schema with shared $defs
+    schema = PlaceOrderRequest.model_json_schema()
+    resp_schema = OrderResponse.model_json_schema()
+
+    # Merge response $defs into request schema
+    defs = schema.setdefault("$defs", {})
+    defs.update(resp_schema.get("$defs", {}))
+    defs["OrderResponse"] = {
+        k: v for k, v in resp_schema.items() if k != "$defs"
+    }
+
+    def _strip_titles(obj: object) -> None:
+        if isinstance(obj, dict):
+            for key, val in list(obj.items()):
+                if key == "properties" and isinstance(val, dict):
+                    for prop in val.values():
+                        if isinstance(prop, dict):
+                            prop.pop("title", None)
+                _strip_titles(val)
+        elif isinstance(obj, list):
+            for item in obj:
+                _strip_titles(item)
+
+    _strip_titles(schema)
+
+    json.dump(schema, sys.stdout, indent=2)
+    sys.stdout.write("\n")

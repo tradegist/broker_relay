@@ -1,7 +1,5 @@
 """E2E test fixtures — httpx client pointed at the local test stack."""
 
-from __future__ import annotations
-
 import httpx
 import pytest
 

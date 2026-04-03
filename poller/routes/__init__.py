@@ -1,7 +1,5 @@
 """Routes package — assembles middleware, handlers, and route table."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os

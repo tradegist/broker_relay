@@ -1,7 +1,5 @@
 """Unit tests for poller.py — parser is mocked (covered by test_flex_parser.py)."""
 
-from __future__ import annotations
-
 import hashlib
 import hmac as hmac_mod
 import json

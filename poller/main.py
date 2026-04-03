@@ -1,7 +1,5 @@
 """IBKR Flex Poller — entry point."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import sqlite3

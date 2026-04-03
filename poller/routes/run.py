@@ -1,7 +1,5 @@
 """POST /ibkr/poller/run — trigger an on-demand poll."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 

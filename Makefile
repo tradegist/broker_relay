@@ -3,8 +3,9 @@
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
 
-setup: ## Install dev dependencies (mypy, pydantic, pytest)
-	pip3 install -r requirements-dev.txt
+setup: ## Create .venv and install all dependencies
+	@test -d .venv || python3 -m venv .venv
+	.venv/bin/pip install -r requirements-dev.txt -r poller/requirements.txt -r remote-client/requirements.txt
 
 deploy: ## Deploy infrastructure (Terraform + Docker)
 	python3 -m cli deploy
