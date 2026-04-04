@@ -274,12 +274,38 @@
           "default": null
         },
         "tif": {
+          "enum": [
+            "DAY",
+            "GTC",
+            "IOC",
+            "GTD",
+            "OPG",
+            "FOK",
+            "DTC"
+          ],
           "type": "string"
         },
         "symbol": {
           "type": "string"
         },
         "secType": {
+          "enum": [
+            "STK",
+            "OPT",
+            "FUT",
+            "IND",
+            "FOP",
+            "CASH",
+            "CFD",
+            "BAG",
+            "WAR",
+            "BOND",
+            "CMDTY",
+            "NEWS",
+            "FUND",
+            "CRYPTO",
+            "EVENT"
+          ],
           "type": "string"
         },
         "exchange": {

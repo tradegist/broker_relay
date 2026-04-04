@@ -2,11 +2,18 @@
 
 import logging
 from decimal import Decimal
+from typing import cast
 
 from ib_async import IB
 from ib_async import Trade as IBTrade
 
-from models_remote_client import FillDetail, ListTradesResponse, TradeDetail
+from models_remote_client import (
+    FillDetail,
+    ListTradesResponse,
+    SecType,
+    TimeInForce,
+    TradeDetail,
+)
 
 log = logging.getLogger("ib-client")
 
@@ -49,9 +56,9 @@ def _map_trade(trade: IBTrade) -> TradeDetail:
         totalQuantity=o.totalQuantity,
         orderType=o.orderType,
         lmtPrice=_lmt_price(o.lmtPrice),
-        tif=o.tif,
+        tif=cast(TimeInForce, o.tif),
         symbol=c.symbol,
-        secType=c.secType,
+        secType=cast(SecType, c.secType),
         exchange=c.exchange,
         currency=c.currency,
         status=s.status,

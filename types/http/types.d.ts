@@ -77,9 +77,24 @@ export interface TradeDetail {
   totalQuantity: number;
   orderType: string;
   lmtPrice?: number | null;
-  tif: string;
+  tif: "DAY" | "GTC" | "IOC" | "GTD" | "OPG" | "FOK" | "DTC";
   symbol: string;
-  secType: string;
+  secType:
+    | "STK"
+    | "OPT"
+    | "FUT"
+    | "IND"
+    | "FOP"
+    | "CASH"
+    | "CFD"
+    | "BAG"
+    | "WAR"
+    | "BOND"
+    | "CMDTY"
+    | "NEWS"
+    | "FUND"
+    | "CRYPTO"
+    | "EVENT";
   exchange: string;
   currency: string;
   status: string;

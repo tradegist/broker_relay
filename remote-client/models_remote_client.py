@@ -103,15 +103,15 @@ class TradeDetail(BaseModel):
     # Order identification
     orderId: int
     permId: int
-    action: str
+    action: str  # str not Action — IB may return values beyond BUY/SELL for reads
     totalQuantity: float
-    orderType: str
+    orderType: str  # str not OrderType — IB returns STP, TRAIL, etc. for existing orders
     lmtPrice: float | None = None
-    tif: str
+    tif: TimeInForce
 
     # Contract
     symbol: str
-    secType: str
+    secType: SecType
     exchange: str
     currency: str
 
