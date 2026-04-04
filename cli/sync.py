@@ -1,8 +1,9 @@
+import shutil
 import subprocess
 
 from cli import (
     load_env, env, validate_poller_env,
-    ssh_cmd, scp_file, die, PROJECT_DIR,
+    ssh_cmd, scp_file, ssh_key_path, die, PROJECT_DIR,
 )
 
 SERVICE_MAP = {
@@ -20,7 +21,11 @@ SERVICE_MAP = {
 
 
 def _sync_local_files(droplet_ip):
-    """Push local commits and pull them on the droplet."""
+    """Rsync project files to the droplet."""
+    if not shutil.which("rsync"):
+        die("rsync is required for --local-files "
+            "(install via: brew install rsync / apt install rsync)")
+
     # Must be on main branch
     branch = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -37,11 +42,27 @@ def _sync_local_files(droplet_ip):
     if dirty:
         die("Cannot sync: uncommitted changes — commit or stash first")
 
-    print("Pushing to origin...")
-    subprocess.run(["git", "push"], check=True, cwd=PROJECT_DIR)
+    print("Syncing files to droplet...")
+    cmd = [
+        "rsync", "-az", "--delete",
+        "-e", f"ssh -i {ssh_key_path()}",
+        "--filter", ":- .gitignore",
+        "--exclude", ".git/",
+        "--exclude", ".env",
+        "--exclude", ".env.test",
+        "--exclude", ".deployed-sha",
+        f"{PROJECT_DIR}/",
+        f"root@{droplet_ip}:/opt/ibkr-relay/",
+    ]
+    subprocess.run(cmd, check=True)
 
-    print("Pulling on droplet...")
-    ssh_cmd(droplet_ip, "cd /opt/ibkr-relay && git pull")
+    # Write deployed commit SHA for traceability
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True, cwd=PROJECT_DIR,
+    ).stdout.strip()
+    ssh_cmd(droplet_ip, f"echo '{sha}' > /opt/ibkr-relay/.deployed-sha")
+    print(f"Deployed commit: {sha[:12]}")
 
 
 def run(args):

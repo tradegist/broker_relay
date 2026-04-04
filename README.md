@@ -429,6 +429,9 @@ All operations are available via `make` or the Python CLI directly. Run `make he
 
 You can also invoke the CLI directly with `python3 -m cli <command>` — useful on Windows or when Make is not available:
 
+> [!NOTE]
+> Most commands work on Windows, but `sync --local-files` requires `rsync` and SSH, which are only available natively on macOS and Linux. On Windows, use [WSL](https://learn.microsoft.com/en-us/windows/wsl/).
+
 ```bash
 python3 -m cli deploy
 python3 -m cli sync gateway
@@ -450,7 +453,7 @@ make deploy                                    # provision droplet + start conta
 make sync                                      # push .env + restart all services
 make sync S=gateway                            # push .env + restart one service
 make sync B=1                                  # push .env + rebuild images + restart
-make sync LOCAL_FILES=1                        # git push/pull + rebuild + restart (full deploy)
+make sync LOCAL_FILES=1                        # rsync files + rebuild + restart (full deploy)
 make sync LOCAL_FILES=1 S=poller               # full deploy, rebuild only poller
 make order Q=2 SYM=TSLA T=MKT                  # buy 2 TSLA at market
 make order Q=-2 SYM=TSLA T=LMT P=380           # sell 2 TSLA limit $380
@@ -495,10 +498,9 @@ This will:
 
 1. Verify you're on `main` (aborts on feature branches)
 2. Verify working tree is clean (aborts on uncommitted changes)
-3. `git push` locally
-4. `git pull` on the droplet
-5. Push `.env`
-6. `docker compose up -d --build --force-recreate`
+3. `rsync` project files to the droplet (respects `.gitignore`, excludes `.env`)
+4. Push `.env`
+5. `docker compose up -d --build --force-recreate`
 
 If you forked this repo, pull upstream changes first, then deploy:
 

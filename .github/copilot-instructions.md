@@ -240,7 +240,7 @@ All commands available via `make` or `python3 -m cli <command>`:
 ```bash
 make deploy    # Terraform init + apply (reads .env)
 make sync      # Push .env to droplet + restart services
-make sync LOCAL_FILES=1  # git push/pull + rebuild + restart (full code deploy)
+make sync LOCAL_FILES=1  # rsync files + rebuild + restart (full code deploy)
 make destroy   # Terraform destroy
 make pause     # Snapshot + delete droplet (save costs)
 make resume    # Restore from snapshot
@@ -258,6 +258,21 @@ python3 -m cli sync --local-files
 python3 -m cli order 2 TSLA MKT
 python3 -m cli poll 2
 ```
+
+## Deployment Model (MANDATORY)
+
+- **`make sync LOCAL_FILES=1` uses rsync** to transfer files from the local working tree to `/opt/ibkr-relay/` on the droplet. It does NOT use git on the droplet — no git clone, no deploy keys, no GitHub access needed from the server.
+- **Guards:** Must be on `main` branch with a clean working tree (no uncommitted changes). This ensures rsync deploys a known committed state.
+- **`--delete` flag:** rsync removes files on the droplet that no longer exist locally. This correctly handles renames and deletions but is dangerous for server-generated files.
+- **Invariant: the project directory (`/opt/ibkr-relay/`) contains only source files.** No service, script, or container may write files into the project directory. All runtime-generated data (databases, caches, logs, certificates) MUST use Docker named volumes (e.g. `poller-data:/data`, `caddy-data:/data`). Docker volumes live under `/var/lib/docker/volumes/`, completely outside the project directory, and are safe from rsync `--delete`.
+- **When adding new runtime data** (a new database, cache file, upload directory, etc.): create a Docker named volume in `docker-compose.yml` and mount it into the container. Never write to a path inside `/opt/ibkr-relay/`.
+- **`.deployed-sha`** is the only server-side file inside the project directory. It is written by `cli/sync.py` after each `--local-files` sync and is excluded from rsync `--delete`. It records the deployed commit SHA for traceability.
+- **rsync exclusions** (files never overwritten or deleted on the droplet):
+  - `.git/` — not present on droplet (no git repo)
+  - `.env` — pushed separately via scp (contains secrets)
+  - `.env.test` — local-only test config
+  - `.deployed-sha` — server-side deployment marker
+  - Everything in `.gitignore` — via `--filter ':- .gitignore'`
 
 ## File Structure
 
