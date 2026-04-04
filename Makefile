@@ -27,8 +27,8 @@ pause: ## Snapshot droplet + delete (save costs)
 resume: ## Restore droplet from snapshot
 	$(PYTHON) -m cli resume
 
-sync: ## Push .env + restart all services (or: make sync S=gateway)
-	$(PYTHON) -m cli sync $(S)
+sync: ## Push .env + restart (S=gateway B=1 LOCAL_FILES=1)
+	$(PYTHON) -m cli sync $(S) $(if $(LOCAL_FILES),--local-files) $(if $(B),--build)
 
 order: ## Place a stock order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE] [TIF=GTC] [RTH=1] [ENV=local])
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli order $(Q) $(SYM) $(T) $(P) $(CUR) $(EX) $(if $(TIF),--tif $(TIF)) $(if $(RTH),--outside-rth)
