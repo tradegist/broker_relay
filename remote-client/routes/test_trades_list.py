@@ -1,0 +1,59 @@
+"""Unit tests for routes/trades_list.py — GET /ibkr/trades error paths."""
+
+import os
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
+from aiohttp import web
+from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
+
+from routes import create_routes
+
+# Patch API_TOKEN at module level in middlewares so auth passes with "test-token".
+_patch_token = patch("routes.middlewares.API_TOKEN", "test-token")
+_patch_token.start()
+from models_remote_client import ListTradesResponse
+
+
+def _make_client(connected: bool = True) -> MagicMock:
+    client = MagicMock()
+    type(client).is_connected = PropertyMock(return_value=connected)
+    client.trades = MagicMock()
+    client.trades.list = AsyncMock(
+        return_value=ListTradesResponse(trades=[])
+    )
+    return client
+
+
+class TestTradesNotConnected(AioHTTPTestCase):
+    async def get_application(self) -> web.Application:
+        return create_routes(_make_client(connected=False))
+
+    @unittest_run_loop
+    async def test_not_connected_returns_503(self) -> None:
+        resp = await self.client.get(
+            "/ibkr/trades",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert resp.status == 503
+        body = await resp.json()
+        assert "Not connected" in body["error"]
+
+
+class TestTradesConnected(AioHTTPTestCase):
+    async def get_application(self) -> web.Application:
+        return create_routes(_make_client(connected=True))
+
+    @unittest_run_loop
+    async def test_returns_empty_trades(self) -> None:
+        resp = await self.client.get(
+            "/ibkr/trades",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert resp.status == 200
+        body = await resp.json()
+        assert body == {"trades": []}
+
+    @unittest_run_loop
+    async def test_requires_auth(self) -> None:
+        resp = await self.client.get("/ibkr/trades")
+        assert resp.status == 401

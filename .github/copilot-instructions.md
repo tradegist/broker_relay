@@ -108,9 +108,17 @@ Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses
 - **`docker-compose.test.yml`** at project root defines the test stack (ib-gateway + webhook-relay only, no Caddy/poller/VNC).
 - **`make e2e`** starts the stack, waits for connection, runs pytest, then tears down. Always cleans up, even on test failure.
 - **`make e2e-up` / `make e2e-down`** for manual stack management during debugging.
+- **`make e2e-run`** restarts `webhook-relay` and `poller` containers (to pick up code changes from volume mounts), then runs the E2E tests. Safe to call repeatedly during development — no need to rebuild or restart manually.
 - **Test API runs on `localhost:15010`** with hardcoded token `test-token`.
 - **No healthcheck on `ib-gateway`** — the `IBClient.connect()` handles retry with exponential backoff, same as production.
 - **Paper accounts require no 2FA**, so the E2E stack is fully automated.
+- **Session conflict detection** — `make e2e-up` checks `ib-gateway` logs for `"Existing session detected"` during startup. IBKR only allows one session per account — if the production droplet or local-dev stack is connected with the same credentials, the test gateway will be rejected.
+
+## Test File Convention
+
+- **Unit tests are colocated** next to the source file they test: `flex_parser.py` → `test_flex_parser.py`, `orders.py` → `test_orders.py`.
+- **E2E tests live in `tests/e2e/`** within each service, since they test multiple components together rather than a single source file.
+- **`make test`** runs all unit tests (both services). **`make e2e-run`** runs all E2E tests (requires Docker stack).
 
 ## Remote Client Structure
 
@@ -123,13 +131,21 @@ remote-client/
   client/                  # IB Gateway client (namespace delegation)
     __init__.py            # IBClient class (connection management)
     orders.py              # OrdersNamespace: place(contract_req, order_req)
+    test_orders.py         # Tests for orders namespace
+    trades.py              # TradesNamespace: list()
+    test_trades.py         # Tests for trades namespace
   routes/                  # HTTP route handlers
     __init__.py            # Orchestrator: create_routes()
     middlewares.py         # Auth middleware (Bearer token)
     order_place.py         # POST /ibkr/order
+    test_order_place.py    # Tests for order_place route
+    trades_list.py         # GET /ibkr/trades
+    test_trades_list.py    # Tests for trades_list route
     health.py              # GET /health
   tests/e2e/               # E2E tests (paper account)
     conftest.py            # httpx fixtures (api + anon_api)
+    test_smoke.py          # Health + auth smoke tests
+    test_trades.py         # Order placement + trade listing
     .env.test.example      # Template for paper credentials
 ```
 
