@@ -12,6 +12,8 @@ help: ## Show available commands
 setup: ## Create .venv and install all dependencies
 	@test -d .venv || python3 -m venv .venv
 	.venv/bin/pip install -r requirements-dev.txt -r poller/requirements.txt -r remote-client/requirements.txt
+	@echo "$(CURDIR)/poller" > $$(find .venv/lib -name site-packages -type d)/ibkr-relay.pth
+	@echo "$(CURDIR)/remote-client" >> $$(find .venv/lib -name site-packages -type d)/ibkr-relay.pth
 
 deploy: ## Deploy infrastructure (Terraform + Docker)
 	$(PYTHON) -m cli deploy
@@ -41,9 +43,9 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli test-webhook $(S)
 
 types: ## Regenerate TypeScript types from Pydantic models
-	$(PYTHON) poller/models.py > types/poller/webhook.schema.json
+	$(PYTHON) poller/models_poller.py > types/poller/webhook.schema.json
 	npx --yes json-schema-to-typescript types/poller/webhook.schema.json > types/poller/webhook.d.ts
-	$(PYTHON) remote-client/models.py > types/http/order.schema.json
+	$(PYTHON) remote-client/models_remote_client.py > types/http/order.schema.json
 	npx --yes json-schema-to-typescript types/http/order.schema.json > types/http/order.d.ts
 	@echo "Generated types/poller/webhook.d.ts + types/http/order.d.ts"
 

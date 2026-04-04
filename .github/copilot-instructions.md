@@ -27,7 +27,7 @@
   4. `make e2e-down` — tear down **only after all tests pass**. Never tear down between iterations.
 - When modifying any Python file (`.py`), always run `make test` and `make typecheck` and confirm both pass before deploying.
 - **Every Python file must be covered by `make typecheck`.** When adding a new Python service, package, or standalone script, immediately add it to the mypy invocation in the Makefile. No Python file may exist outside mypy's scope.
-- After modifying any model in `poller/models.py` or `remote-client/models.py`, also run `make types` to regenerate the TypeScript definitions.
+- After modifying any model in `poller/models_poller.py` or `remote-client/models_remote_client.py`, also run `make types` to regenerate the TypeScript definitions.
 - **Always verify type safety by breaking it first.** After any refactor that touches types or model construction, deliberately introduce a type error (e.g. pass a `str` where `float` is expected), run `make typecheck`, and confirm it **fails**. Then revert and confirm it passes. Never assume mypy catches something — prove it.
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)` — mypy cannot type-check `**dict[str, Any]`. Use explicit keyword arguments or `model_copy(update=...)` instead.
 
@@ -50,7 +50,8 @@
 
 - **`.venv` is the project's virtual environment.** Created by `make setup` using Homebrew Python. All dev dependencies are installed there.
 - **Auto-activation** is configured in `~/.zshrc` via a `chpwd` hook — the venv activates automatically when `cd`'ing into the project directory.
-- **`make setup`** creates the `.venv` (if missing) and installs all dependencies (`requirements-dev.txt` + both service requirements).
+- **`make setup`** creates the `.venv` (if missing), installs all dependencies (`requirements-dev.txt` + both service requirements), and writes a `.pth` file (see below).
+- **`ibkr-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `poller/` and `remote-client/` to `sys.path` so that `from models_poller import ...` and `from models_remote_client import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
 - **`.venv/` is gitignored** — never commit it.
 
 ## Dependency Management
@@ -78,7 +79,7 @@ Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 | `poller`             | Polls IBKR Flex for trade confirmations, fires webhooks                        |
 | `gateway-controller` | Lightweight sidecar — starts ib-gateway container via Docker socket            |
 
-All secrets are injected via `.env` → `env_file` or `environment` in `docker-compose.yml`.
+All secrets are injected via `.env` → `environment` in `docker-compose.yml`.
 Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses `{$VNC_DOMAIN}` / `{$TRADE_DOMAIN}` syntax.
 
 ## Memory & Droplet Sizing
@@ -118,7 +119,7 @@ The `remote-client/` service is organized into packages:
 ```
 remote-client/
   main.py                  # Entrypoint (connection + HTTP server)
-  models.py                # Pydantic request/response models (order API)
+  models_remote_client.py  # Pydantic request/response models (order API)
   client/                  # IB Gateway client (namespace delegation)
     __init__.py            # IBClient class (connection management)
     orders.py              # OrdersNamespace: place(contract_req, order_req)
@@ -143,7 +144,7 @@ The `poller/` service follows the same package pattern:
 ```
 poller/
   main.py                  # Entrypoint (polling loop + HTTP API startup)
-  models.py                # Pydantic models: Fill, Trade, WebhookPayload, BuySell
+  models_poller.py         # Pydantic models: Fill, Trade, WebhookPayload, BuySell
   poller/                  # Core polling logic (package)
     __init__.py            # SQLite dedup, webhook delivery, Flex fetch, poll_once()
     flex_parser.py         # XML parser (Activity Flex + Trade Confirmation)
@@ -159,20 +160,21 @@ poller/
 
 - **`poller/poller/`** contains core logic: SQLite dedup, webhook delivery (HMAC-SHA256), Flex Web Service two-step fetch, and `poll_once()`.
 - **`poller/routes/`** contains the HTTP API for on-demand polls (`POST /ibkr/poller/run`).
-- **`poller/models.py`** is the source of truth for TypeScript types (`make types`).
+- **`poller/models_poller.py`** is the source of truth for TypeScript types (`make types`).
 
 ## Models (Two Separate Files)
 
-This project has **two independent `models.py` files** — they serve different concerns and share no code:
+This project has **two independent model files** with unique names to avoid import ambiguity:
 
-| File                      | Domain                      | Contains                                                                                 |
-| ------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
-| `poller/models.py`        | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                 |
-| `remote-client/models.py` | Order API (inbound)         | `ContractRequest`, `OrderRequest`, `PlaceOrderRequest`, `OrderResponse` — REST API types |
+| File                                   | Domain                      | Contains                                                                                 |
+| -------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
+| `poller/models_poller.py`              | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                 |
+| `remote-client/models_remote_client.py`| Order API (inbound)         | `ContractRequest`, `OrderRequest`, `PlaceOrderRequest`, `OrderResponse` — REST API types |
 
-- `poller/models.py` is the source of truth for `IbkrPoller` TypeScript types (`make types`).
-- `remote-client/models.py` is the source of truth for `IbkrHttp` TypeScript types (`make types`).
-- `remote-client/models.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
+- **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `poller/` and `remote-client/` are on `sys.path` (via the `.pth` file). Use `from models_poller import ...` and `from models_remote_client import ...` everywhere.
+- `models_poller.py` is the source of truth for `IbkrPoller` TypeScript types (`make types`).
+- `models_remote_client.py` is the source of truth for `IbkrHttp` TypeScript types (`make types`).
+- `models_remote_client.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
 - Both use `ConfigDict(extra="forbid")` for strict validation.
 
 ## Order API Payload
@@ -206,8 +208,8 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
 - Types are published as `@tradegist/ibkr-types` (npm package in `types/`, not yet published).
 - **Two namespaces**: `IbkrPoller` (webhook payload types) and `IbkrHttp` (order API types).
 - **`make types`** regenerates both from Pydantic models:
-  - `poller/models.py` → `types/poller/webhook.d.ts`
-  - `remote-client/models.py` → `types/http/order.d.ts`
+  - `poller/models_poller.py` → `types/poller/webhook.d.ts`
+  - `remote-client/models_remote_client.py` → `types/http/order.d.ts`
 - **Structure:**
   ```
   types/
@@ -215,20 +217,20 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
     package.json               # @tradegist/ibkr-types
     poller/
       index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
-      webhook.d.ts             # Generated from poller/models.py
+      webhook.d.ts             # Generated from poller/models_poller.py
       webhook.schema.json      # Intermediate JSON Schema
     http/
       index.d.ts               # Re-exports: PlaceOrderRequest, ContractRequest, OrderRequest, OrderResponse
-      order.d.ts               # Generated from remote-client/models.py
+      order.d.ts               # Generated from remote-client/models_remote_client.py
       order.schema.json        # Intermediate JSON Schema
   ```
 - **Usage:** `import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-types"`
-- Both `models.py` files have `__main__` blocks that output JSON Schema to stdout (used by the Makefile).
+- Both model files have `__main__` blocks that output JSON Schema to stdout (used by the Makefile).
 
 ## Code Style
 
 - Python: `logging` module, f-strings, `aiohttp` for async HTTP in both webhook-relay and poller, `httpx` for sync HTTP client in poller.
-- CLI scripts: Python (`cli/` package), invoked via `python3 -m cli <command>` or `make`. Uses only stdlib (`subprocess`, `urllib.request`, `json`, `os`). No third-party dependencies.
+- CLI scripts: Python (`cli/` package), invoked via `python3 -m cli <command>` or `make`. Uses only stdlib (`subprocess`, `urllib.request`, `json`, `os`). No third-party dependencies. Uses lazy dispatch (`importlib.import_module`) — each command only imports its own module.
 - Terraform: all secrets marked `sensitive = true` in `variables.tf`.
 
 ## Build & Deploy
@@ -262,7 +264,7 @@ python3 -m cli poll 2
 docker-compose.yml      # All 6 services
 cli/                    # Python CLI (operator scripts)
   __init__.py           # Shared helpers (env loading, SSH, DO API, validation)
-  __main__.py           # Entry point (python3 -m cli <command>)
+  __main__.py           # Entry point (lazy dispatch via importlib)
   deploy.py             # Terraform init + apply
   destroy.py            # Terraform destroy
   pause.py              # Snapshot + delete droplet
@@ -273,7 +275,7 @@ cli/                    # Python CLI (operator scripts)
 caddy/Caddyfile         # Reverse proxy config (uses env vars for domains)
 remote-client/          # webhook-relay service (see Remote Client Structure above)
 poller/                 # Flex poller service (see Poller Structure above)
-  models.py             # Pydantic models: Fill, Trade, WebhookPayload, BuySell
+  models_poller.py      # Pydantic models: Fill, Trade, WebhookPayload, BuySell
 gateway-controller/     # CGI sidecar (Alpine, busybox httpd)
 novnc/index.html        # Custom VNC UI (Tailwind CSS)
 types/                  # @tradegist/ibkr-types npm package (IbkrPoller + IbkrHttp namespaces)

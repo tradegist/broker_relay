@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import importlib
 import sys
 
 
@@ -54,8 +55,6 @@ def main():
     if not args.command:
         parser.print_help()
         sys.exit(1)
-
-    import importlib
 
     modules = {
         "deploy": "cli.deploy",

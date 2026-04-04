@@ -270,11 +270,11 @@ types/
   package.json               # @tradegist/ibkr-types
   poller/
     index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
-    webhook.d.ts             # Generated from poller/models.py
+    webhook.d.ts             # Generated from poller/models_poller.py
     webhook.schema.json      # Intermediate JSON Schema
   http/
     index.d.ts               # Re-exports: PlaceOrderRequest, ContractRequest, OrderRequest, OrderResponse
-    order.d.ts               # Generated from remote-client/models.py
+    order.d.ts               # Generated from remote-client/models_remote_client.py
     order.schema.json        # Intermediate JSON Schema
 ```
 
@@ -375,7 +375,7 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
 
 The `trades` array contains one `Trade` object per order (fills are aggregated by `orderId`). The `errors` array contains warnings about unknown XML attributes or parse errors — it is empty when everything parsed cleanly. See [Flex XML Parsing](#flex-xml-parsing) for details.
 
-Each `Trade` includes **all fields** from the IBKR Flex XML (see [`poller/models.py`](poller/models.py) for the full list). Most fields not present in the XML default to `""` or `0.0`, but `buySell` must be present; rows missing it are skipped and reported in `errors`.
+Each `Trade` includes **all fields** from the IBKR Flex XML (see [`poller/models_poller.py`](poller/models_poller.py) for the full list). Most fields not present in the XML default to `""` or `0.0`, but `buySell` must be present; rows missing it are skipped and reported in `errors`.
 
 The payload is signed with HMAC-SHA256. Verify using the `X-Signature-256` header:
 
@@ -513,7 +513,7 @@ After changing a variable in `.env`, restart only the affected service:
 │ ├── Dockerfile
 │   ├── requirements.txt       # ib_async, aiohttp
 │   ├── main.py                # Entrypoint (connection + HTTP server)
-│   ├── models.py              # Pydantic models (order API types)
+│   ├── models_remote_client.py # Pydantic models (order API types)
 │   ├── client/                # IB Gateway client (namespace delegation)
 │   │   ├── __init__.py        # IBClient class (connection management)
 │   │   └── orders.py          # OrdersNamespace (place orders)
@@ -530,7 +530,7 @@ After changing a variable in `.env`, restart only the affected service:
 │   ├── Dockerfile
 │   ├── requirements.txt       # httpx, pydantic, aiohttp
 │   ├── main.py                # Entrypoint (polling loop + HTTP API)
-│   ├── models.py              # Pydantic models (Fill, Trade, WebhookPayload, BuySell)
+│   ├── models_poller.py       # Pydantic models (Fill, Trade, WebhookPayload, BuySell)
 │   ├── poller/                # Core polling logic (package)
 │   │   ├── __init__.py        # SQLite dedup, webhook delivery, Flex fetch, poll_once()
 │   │   ├── flex_parser.py     # Flex XML parser (Activity + Trade Confirmation)
@@ -546,10 +546,10 @@ After changing a variable in `.env`, restart only the affected service:
     ├── package.json
     ├── poller/                # IbkrPoller namespace
     │   ├── index.d.ts
-    │   └── webhook.d.ts       # Generated from poller/models.py
+    │   └── webhook.d.ts       # Generated from poller/models_poller.py
     └── http/                  # IbkrHttp namespace
         ├── index.d.ts
-        └── order.d.ts         # Generated from remote-client/models.py
+        └── order.d.ts         # Generated from remote-client/models_remote_client.py
 
 ```
 
@@ -663,7 +663,7 @@ Example response:
 }
 ```
 
-Field names mirror `ib_async` exactly (e.g. `lmtPrice`, `totalQuantity`, `secType`, `tif`, `outsideRth`). See [`remote-client/models.py`](remote-client/models.py) for the full schema.
+Field names mirror `ib_async` exactly (e.g. `lmtPrice`, `totalQuantity`, `secType`, `tif`, `outsideRth`). See [`remote-client/models_remote_client.py`](remote-client/models_remote_client.py) for the full schema.
 
 > **Note**: The gateway must have `READ_ONLY_API=no` for orders to be accepted.
 
@@ -803,7 +803,7 @@ The poller supports both **Activity Flex Queries** (`<Trade>` tags) and **Trade 
   | `settleDateTarget`   | `settleDateTarget`      | `settleDate`                 |
   | `tradeMoney`         | `tradeMoney`            | `amount`                     |
 
-- **All known fields are forwarded as-is** from the XML. The full list of supported fields is defined in [`poller/models.py`](poller/models.py). Unknown XML attributes are silently dropped but reported in the `errors` array of the webhook payload.
+- **All known fields are forwarded as-is** from the XML. The full list of supported fields is defined in [`poller/models_poller.py`](poller/models_poller.py). Unknown XML attributes are silently dropped but reported in the `errors` array of the webhook payload.
 
 - **Fills are aggregated into trades** by `orderId`. When an order has multiple fills:
   - `quantity` is the sum of all fills
