@@ -19,8 +19,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt -r poller/requirements.txt -r remote-client/requirements.txt
 
-      - name: Run unit tests
-        run: make test PYTHON=python3
+      - name: Run linter
+        run: make lint PYTHON=python3
 
       - name: Run type checking
         run: make typecheck PYTHON=python3
+
+      - name: Run unit tests
+        run: make test PYTHON=python3
