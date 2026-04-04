@@ -2,13 +2,14 @@
 
 from aiohttp import web
 
-from client import IBClient
+from client import IBClient, TRADING_MODE
+from models_remote_client import HealthResponse
 
 
 async def handle_health(request: web.Request) -> web.Response:
     client: IBClient = request.app["client"]
-    from client import TRADING_MODE
-    return web.json_response({
-        "connected": client.is_connected,
-        "tradingMode": TRADING_MODE,
-    })
+    resp = HealthResponse(
+        connected=client.is_connected,
+        tradingMode=TRADING_MODE,
+    )
+    return web.json_response(resp.model_dump())

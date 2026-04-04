@@ -5,19 +5,19 @@
  * and run json-schema-to-typescript to regenerate this file.
  */
 
-export type OrderSchema = PlaceOrderRequest | OrderResponse;
+export type TypesSchema = PlaceOrderPayload | PlaceOrderResponse | HealthResponse;
 
 /**
  * Top-level request body for POST /ibkr/order.
  */
-export interface PlaceOrderRequest {
-  contract: ContractRequest;
-  order: OrderRequest;
+export interface PlaceOrderPayload {
+  contract: ContractPayload;
+  order: OrderPayload;
 }
 /**
  * Contract fields for identifying the instrument (mirrors ib_async.Contract).
  */
-export interface ContractRequest {
+export interface ContractPayload {
   symbol: string;
   secType?:
     | "STK"
@@ -42,7 +42,7 @@ export interface ContractRequest {
 /**
  * Order fields for specifying the trade (mirrors ib_async.Order).
  */
-export interface OrderRequest {
+export interface OrderPayload {
   action: "BUY" | "SELL";
   totalQuantity: number;
   orderType: "MKT" | "LMT";
@@ -50,7 +50,7 @@ export interface OrderRequest {
   tif?: "DAY" | "GTC" | "IOC" | "GTD" | "OPG" | "FOK" | "DTC";
   outsideRth?: boolean;
 }
-export interface OrderResponse {
+export interface PlaceOrderResponse {
   status: string;
   orderId: number;
   action: "BUY" | "SELL";
@@ -58,4 +58,8 @@ export interface OrderResponse {
   totalQuantity: number;
   orderType: "MKT" | "LMT";
   lmtPrice?: number | null;
+}
+export interface HealthResponse {
+  connected: boolean;
+  tradingMode: string;
 }

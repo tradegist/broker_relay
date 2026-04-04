@@ -43,11 +43,11 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli test-webhook $(S)
 
 types: ## Regenerate TypeScript types from Pydantic models
-	$(PYTHON) poller/models_poller.py > types/poller/webhook.schema.json
-	npx --yes json-schema-to-typescript types/poller/webhook.schema.json > types/poller/webhook.d.ts
-	$(PYTHON) remote-client/models_remote_client.py > types/http/order.schema.json
-	npx --yes json-schema-to-typescript types/http/order.schema.json > types/http/order.d.ts
-	@echo "Generated types/poller/webhook.d.ts + types/http/order.d.ts"
+	$(PYTHON) schema_gen.py models_poller > types/poller/types.schema.json
+	npx --yes json-schema-to-typescript types/poller/types.schema.json > types/poller/types.d.ts
+	$(PYTHON) schema_gen.py models_remote_client > types/http/types.schema.json
+	npx --yes json-schema-to-typescript types/http/types.schema.json > types/http/types.d.ts
+	@echo "Generated types/poller/types.d.ts + types/http/types.d.ts"
 
 test: ## Run unit tests
 	PYTHONPATH=.:poller:remote-client $(PYTHON) -m pytest -v
@@ -55,6 +55,7 @@ test: ## Run unit tests
 typecheck: ## Run mypy strict type checking
 	MYPYPATH=poller $(PYTHON) -m mypy poller/ cli/test_webhook.py
 	MYPYPATH=remote-client $(PYTHON) -m mypy remote-client/
+	$(PYTHON) -m mypy schema_gen.py
 
 local-up: ## Start full stack locally (no TLS, direct port access)
 	$(LOCAL_COMPOSE) up -d --build

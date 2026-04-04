@@ -1,6 +1,6 @@
 {
   "$defs": {
-    "ContractRequest": {
+    "ContractPayload": {
       "additionalProperties": false,
       "description": "Contract fields for identifying the instrument (mirrors ib_async.Contract).",
       "properties": {
@@ -44,10 +44,10 @@
       "required": [
         "symbol"
       ],
-      "title": "ContractRequest",
+      "title": "ContractPayload",
       "type": "object"
     },
-    "OrderRequest": {
+    "OrderPayload": {
       "additionalProperties": false,
       "description": "Order fields for specifying the trade (mirrors ib_async.Order).",
       "properties": {
@@ -103,28 +103,28 @@
         "totalQuantity",
         "orderType"
       ],
-      "title": "OrderRequest",
+      "title": "OrderPayload",
       "type": "object"
     },
-    "PlaceOrderRequest": {
+    "PlaceOrderPayload": {
       "additionalProperties": false,
       "description": "Top-level request body for POST /ibkr/order.",
       "properties": {
         "contract": {
-          "$ref": "#/$defs/ContractRequest"
+          "$ref": "#/$defs/ContractPayload"
         },
         "order": {
-          "$ref": "#/$defs/OrderRequest"
+          "$ref": "#/$defs/OrderPayload"
         }
       },
       "required": [
         "contract",
         "order"
       ],
-      "title": "PlaceOrderRequest",
+      "title": "PlaceOrderPayload",
       "type": "object"
     },
-    "OrderResponse": {
+    "PlaceOrderResponse": {
       "additionalProperties": false,
       "properties": {
         "status": {
@@ -173,16 +173,36 @@
         "totalQuantity",
         "orderType"
       ],
-      "title": "OrderResponse",
+      "title": "PlaceOrderResponse",
+      "type": "object"
+    },
+    "HealthResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "connected": {
+          "type": "boolean"
+        },
+        "tradingMode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connected",
+        "tradingMode"
+      ],
+      "title": "HealthResponse",
       "type": "object"
     }
   },
   "anyOf": [
     {
-      "$ref": "#/$defs/PlaceOrderRequest"
+      "$ref": "#/$defs/PlaceOrderPayload"
     },
     {
-      "$ref": "#/$defs/OrderResponse"
+      "$ref": "#/$defs/PlaceOrderResponse"
+    },
+    {
+      "$ref": "#/$defs/HealthResponse"
     }
   ]
 }

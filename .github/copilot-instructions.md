@@ -166,16 +166,34 @@ poller/
 
 This project has **two independent model files** with unique names to avoid import ambiguity:
 
-| File                                    | Domain                      | Contains                                                                                 |
-| --------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
-| `poller/models_poller.py`               | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                 |
-| `remote-client/models_remote_client.py` | Order API (inbound)         | `ContractRequest`, `OrderRequest`, `PlaceOrderRequest`, `OrderResponse` — REST API types |
+| File                                    | Domain                      | Contains                                                                                      |
+| --------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------- |
+| `poller/models_poller.py`               | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                      |
+| `remote-client/models_remote_client.py` | Order API (inbound)         | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types |
 
 - **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `poller/` and `remote-client/` are on `sys.path` (via the `.pth` file). Use `from models_poller import ...` and `from models_remote_client import ...` everywhere.
 - `models_poller.py` is the source of truth for `IbkrPoller` TypeScript types (`make types`).
 - `models_remote_client.py` is the source of truth for `IbkrHttp` TypeScript types (`make types`).
 - `models_remote_client.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
 - Both use `ConfigDict(extra="forbid")` for strict validation.
+
+## Naming Convention for API Models
+
+All public-facing Pydantic models follow the pattern **`{Action}{Resource}{InterfaceType}`**:
+
+| Suffix     | Meaning                              | Example              |
+| ---------- | ------------------------------------ | -------------------- |
+| `Payload`  | Request body (POST/PUT JSON payload) | `PlaceOrderPayload`  |
+| `Response` | Response body returned to the caller | `PlaceOrderResponse` |
+| `Params`   | Query parameters (GET requests)      | `ListTradesParams`   |
+
+Rules:
+
+- **Payload** = what the client sends in the body. Nested sub-models also use `Payload` (e.g. `ContractPayload`, `OrderPayload`).
+- **Response** = what the server returns. Prefixed with the action to avoid ambiguity (`PlaceOrderResponse`, not `OrderResponse`).
+- **Params** = URL query parameters, used for GET endpoints.
+- Domain types (`Action`, `OrderType`, `SecType`, `TimeInForce`, `BuySell`) have no suffix — they are not API interface types.
+- **Group by endpoint, not by type.** All interfaces for a single endpoint (Payload, Response, Params) must live together in the same section of their `models_*.py` file. Do not separate Payloads and Responses into different blocks — group them by the action they belong to (e.g. all `PlaceOrder*` models together, all `ListTrades*` models together).
 
 ## Order API Payload
 
@@ -217,15 +235,15 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
     package.json               # @tradegist/ibkr-types
     poller/
       index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
-      webhook.d.ts             # Generated from poller/models_poller.py
-      webhook.schema.json      # Intermediate JSON Schema
+      types.d.ts               # Generated from poller/models_poller.py
+      types.schema.json         # Intermediate JSON Schema
     http/
-      index.d.ts               # Re-exports: PlaceOrderRequest, ContractRequest, OrderRequest, OrderResponse
-      order.d.ts               # Generated from remote-client/models_remote_client.py
-      order.schema.json        # Intermediate JSON Schema
+      index.d.ts               # Re-exports: PlaceOrderPayload, ContractPayload, OrderPayload, PlaceOrderResponse
+      types.d.ts               # Generated from remote-client/models_remote_client.py
+      types.schema.json         # Intermediate JSON Schema
   ```
 - **Usage:** `import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-types"`
-- Both model files have `__main__` blocks that output JSON Schema to stdout (used by the Makefile).
+- Each model file declares a `SCHEMA_MODELS` list at the bottom — `schema_gen.py` reads it to generate the JSON Schema. **To export a new model to TypeScript, append it to `SCHEMA_MODELS` in the relevant `models_*.py` file and update the corresponding `types/*/index.d.ts` re-exports.**
 
 ## Code Style
 

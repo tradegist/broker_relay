@@ -5,6 +5,7 @@ import logging
 
 from aiohttp import web
 
+from models_poller import RunPollResponse
 from poller import poll_once
 
 log = logging.getLogger("poller")
@@ -37,7 +38,8 @@ async def handle_run_poll(request: web.Request) -> web.Response:
             flex_token=flex_token, flex_query_id=flex_query_id, replay=replay,
         )
         result = trades if isinstance(trades, list) else []
-        return web.json_response({"trades": [t.model_dump() for t in result]})
+        resp = RunPollResponse(trades=result)
+        return web.json_response(resp.model_dump())
     except Exception as exc:
         log.exception("On-demand poll failed")
         return web.json_response({"error": str(exc)}, status=500)

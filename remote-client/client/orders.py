@@ -5,7 +5,7 @@ import logging
 
 from ib_async import IB, Contract, LimitOrder, MarketOrder, Order
 
-from models_remote_client import ContractRequest, OrderRequest, OrderResponse
+from models_remote_client import ContractPayload, OrderPayload, PlaceOrderResponse
 
 log = logging.getLogger("ib-client")
 
@@ -18,9 +18,9 @@ class OrdersNamespace:
 
     async def place(
         self,
-        contract_req: ContractRequest,
-        order_req: OrderRequest,
-    ) -> OrderResponse:
+        contract_req: ContractPayload,
+        order_req: OrderPayload,
+    ) -> PlaceOrderResponse:
         """Place an order and return the result.
 
         Raises ValueError for invalid input, RuntimeError for IB errors.
@@ -76,7 +76,7 @@ class OrdersNamespace:
         # Give IBKR a moment to acknowledge
         await asyncio.sleep(1)
 
-        return OrderResponse(
+        return PlaceOrderResponse(
             status=trade.orderStatus.status,
             orderId=trade.order.orderId,
             action=order_req.action,

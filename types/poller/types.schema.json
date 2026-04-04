@@ -367,27 +367,69 @@
       ],
       "title": "Trade",
       "type": "object"
-    }
-  },
-  "additionalProperties": false,
-  "properties": {
-    "trades": {
-      "items": {
-        "$ref": "#/$defs/Trade"
-      },
-      "type": "array"
     },
-    "errors": {
-      "items": {
-        "type": "string"
+    "WebhookPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "trades": {
+          "items": {
+            "$ref": "#/$defs/Trade"
+          },
+          "type": "array"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
       },
-      "type": "array"
+      "required": [
+        "trades",
+        "errors"
+      ],
+      "title": "WebhookPayload",
+      "type": "object"
+    },
+    "RunPollResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "trades": {
+          "items": {
+            "$ref": "#/$defs/Trade"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "trades"
+      ],
+      "title": "RunPollResponse",
+      "type": "object"
+    },
+    "HealthResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "HealthResponse",
+      "type": "object"
     }
   },
-  "required": [
-    "trades",
-    "errors"
-  ],
-  "title": "WebhookPayload",
-  "type": "object"
+  "anyOf": [
+    {
+      "$ref": "#/$defs/WebhookPayload"
+    },
+    {
+      "$ref": "#/$defs/RunPollResponse"
+    },
+    {
+      "$ref": "#/$defs/HealthResponse"
+    }
+  ]
 }
