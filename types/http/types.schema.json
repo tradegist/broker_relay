@@ -133,6 +133,9 @@
         "orderId": {
           "type": "integer"
         },
+        "permId": {
+          "type": "integer"
+        },
         "action": {
           "enum": [
             "BUY",
@@ -168,6 +171,7 @@
       "required": [
         "status",
         "orderId",
+        "permId",
         "action",
         "symbol",
         "totalQuantity",
@@ -192,6 +196,151 @@
       ],
       "title": "HealthResponse",
       "type": "object"
+    },
+    "FillDetail": {
+      "additionalProperties": false,
+      "description": "Single execution fill within a trade.",
+      "properties": {
+        "execId": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        },
+        "exchange": {
+          "type": "string"
+        },
+        "side": {
+          "type": "string"
+        },
+        "shares": {
+          "type": "number"
+        },
+        "price": {
+          "type": "number"
+        },
+        "commission": {
+          "type": "number"
+        },
+        "commissionCurrency": {
+          "type": "string"
+        },
+        "realizedPNL": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "execId",
+        "time",
+        "exchange",
+        "side",
+        "shares",
+        "price",
+        "commission",
+        "commissionCurrency",
+        "realizedPNL"
+      ],
+      "title": "FillDetail",
+      "type": "object"
+    },
+    "TradeDetail": {
+      "additionalProperties": false,
+      "description": "A trade with its order info, status, and fills.",
+      "properties": {
+        "orderId": {
+          "type": "integer"
+        },
+        "permId": {
+          "type": "integer"
+        },
+        "action": {
+          "type": "string"
+        },
+        "totalQuantity": {
+          "type": "number"
+        },
+        "orderType": {
+          "type": "string"
+        },
+        "lmtPrice": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tif": {
+          "type": "string"
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "secType": {
+          "type": "string"
+        },
+        "exchange": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "filled": {
+          "type": "number"
+        },
+        "remaining": {
+          "type": "number"
+        },
+        "avgFillPrice": {
+          "type": "number"
+        },
+        "fills": {
+          "items": {
+            "$ref": "#/$defs/FillDetail"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "orderId",
+        "permId",
+        "action",
+        "totalQuantity",
+        "orderType",
+        "tif",
+        "symbol",
+        "secType",
+        "exchange",
+        "currency",
+        "status",
+        "filled",
+        "remaining",
+        "avgFillPrice"
+      ],
+      "title": "TradeDetail",
+      "type": "object"
+    },
+    "ListTradesResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "trades": {
+          "items": {
+            "$ref": "#/$defs/TradeDetail"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "trades"
+      ],
+      "title": "ListTradesResponse",
+      "type": "object"
     }
   },
   "anyOf": [
@@ -203,6 +352,9 @@
     },
     {
       "$ref": "#/$defs/HealthResponse"
+    },
+    {
+      "$ref": "#/$defs/ListTradesResponse"
     }
   ]
 }

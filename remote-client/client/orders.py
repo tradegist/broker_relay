@@ -79,6 +79,7 @@ class OrdersNamespace:
         return PlaceOrderResponse(
             status=trade.orderStatus.status,
             orderId=trade.order.orderId,
+            permId=trade.order.permId,
             action=order_req.action,
             symbol=contract_req.symbol,
             totalQuantity=order_req.totalQuantity,

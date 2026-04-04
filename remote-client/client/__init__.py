@@ -7,6 +7,7 @@ import os
 from ib_async import IB
 
 from client.orders import OrdersNamespace
+from client.trades import TradesNamespace
 
 log = logging.getLogger("ib-client")
 
@@ -31,6 +32,7 @@ class IBClient:
         self.ib = IB()
         self._retry_delay = INITIAL_RETRY_DELAY
         self.orders = OrdersNamespace(self.ib)
+        self.trades = TradesNamespace(self.ib)
 
     @property
     def is_connected(self) -> bool:

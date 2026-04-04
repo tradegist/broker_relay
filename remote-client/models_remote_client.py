@@ -60,6 +60,7 @@ class PlaceOrderResponse(BaseModel):
 
     status: str
     orderId: int
+    permId: int
     action: Action
     symbol: str
     totalQuantity: float
@@ -76,10 +77,65 @@ class HealthResponse(BaseModel):
     tradingMode: str
 
 
+# ── GET /ibkr/trades ─────────────────────────────────────────────────
+
+class FillDetail(BaseModel):
+    """Single execution fill within a trade."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    execId: str
+    time: str
+    exchange: str
+    side: str
+    shares: float
+    price: float
+    commission: float
+    commissionCurrency: str
+    realizedPNL: float
+
+
+class TradeDetail(BaseModel):
+    """A trade with its order info, status, and fills."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Order identification
+    orderId: int
+    permId: int
+    action: str
+    totalQuantity: float
+    orderType: str
+    lmtPrice: float | None = None
+    tif: str
+
+    # Contract
+    symbol: str
+    secType: str
+    exchange: str
+    currency: str
+
+    # Status
+    status: str
+    filled: float
+    remaining: float
+    avgFillPrice: float
+
+    # Fills
+    fills: list[FillDetail] = Field(default_factory=list)
+
+
+class ListTradesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trades: list[TradeDetail]
+
+
 # ── Schema export (used by schema_gen.py → make types) ──────────────
 
 SCHEMA_MODELS: list[type[BaseModel]] = [
     PlaceOrderPayload,
     PlaceOrderResponse,
     HealthResponse,
+    ListTradesResponse,
 ]

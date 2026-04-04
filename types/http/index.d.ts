@@ -4,4 +4,7 @@ export type {
   OrderPayload,
   PlaceOrderResponse,
   HealthResponse,
+  FillDetail,
+  TradeDetail,
+  ListTradesResponse,
 } from "./types";

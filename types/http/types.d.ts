@@ -5,7 +5,7 @@
  * and run json-schema-to-typescript to regenerate this file.
  */
 
-export type TypesSchema = PlaceOrderPayload | PlaceOrderResponse | HealthResponse;
+export type TypesSchema = PlaceOrderPayload | PlaceOrderResponse | HealthResponse | ListTradesResponse;
 
 /**
  * Top-level request body for POST /ibkr/order.
@@ -53,6 +53,7 @@ export interface OrderPayload {
 export interface PlaceOrderResponse {
   status: string;
   orderId: number;
+  permId: number;
   action: "BUY" | "SELL";
   symbol: string;
   totalQuantity: number;
@@ -62,4 +63,42 @@ export interface PlaceOrderResponse {
 export interface HealthResponse {
   connected: boolean;
   tradingMode: string;
+}
+export interface ListTradesResponse {
+  trades: TradeDetail[];
+}
+/**
+ * A trade with its order info, status, and fills.
+ */
+export interface TradeDetail {
+  orderId: number;
+  permId: number;
+  action: string;
+  totalQuantity: number;
+  orderType: string;
+  lmtPrice?: number | null;
+  tif: string;
+  symbol: string;
+  secType: string;
+  exchange: string;
+  currency: string;
+  status: string;
+  filled: number;
+  remaining: number;
+  avgFillPrice: number;
+  fills?: FillDetail[];
+}
+/**
+ * Single execution fill within a trade.
+ */
+export interface FillDetail {
+  execId: string;
+  time: string;
+  exchange: string;
+  side: string;
+  shares: number;
+  price: number;
+  commission: number;
+  commissionCurrency: string;
+  realizedPNL: number;
 }

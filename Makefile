@@ -79,6 +79,22 @@ e2e-up: ## Start E2E test stack (IB Gateway + webhook-relay + poller)
 			if curl -sf http://localhost:15010/health | grep -q '"connected": true'; then \
 				echo "webhook-relay ready"; break; \
 			fi; \
+			if $(E2E_COMPOSE) logs ib-gateway 2>&1 | grep -q "Existing session detected"; then \
+				echo ""; \
+				echo "ERROR: IB Gateway detected an existing session (another login is active)."; \
+				echo "This is likely the production droplet or another local stack."; \
+				echo "Disconnect that session first, then:  make e2e-down && make e2e-up"; \
+				echo ""; \
+				exit 1; \
+			fi; \
+			if ! $(E2E_COMPOSE) ps ib-gateway --status running -q 2>/dev/null | grep -q .; then \
+				echo ""; \
+				echo "ERROR: ib-gateway container exited unexpectedly."; \
+				echo "Last logs:"; \
+				$(E2E_COMPOSE) logs --tail=20 ib-gateway; \
+				echo ""; \
+				exit 1; \
+			fi; \
 			sleep 10; \
 		done; \
 		echo "Waiting for poller..."; \
@@ -94,6 +110,7 @@ e2e-down: ## Stop and remove E2E test stack
 	$(E2E_COMPOSE) down
 
 e2e-run: ## Run E2E tests (stack must be up)
+	@$(E2E_COMPOSE) restart webhook-relay poller > /dev/null 2>&1 && sleep 3
 	$(PYTHON) -m pytest remote-client/tests/e2e/ poller/tests/e2e/ -v
 
 e2e: ## Run E2E tests against local paper account (starts/stops stack)
