@@ -1,1 +1,7 @@
-export type { BuySell, WebhookPayload, Trade } from "./webhook";
+export type {
+  BuySell,
+  WebhookPayload,
+  Trade,
+  RunPollResponse,
+  HealthResponse,
+} from "./types";

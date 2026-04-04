@@ -1,0 +1,143 @@
+"""E2E tests — POST /ibkr/order and GET /ibkr/trades against a paper account."""
+
+import time
+from typing import Any
+
+import httpx
+import pytest
+
+# ── Auth ─────────────────────────────────────────────────────────────
+
+
+def test_trades_requires_auth(anon_api: httpx.Client) -> None:
+    resp = anon_api.get("/ibkr/trades")
+    assert resp.status_code == 401
+
+
+# ── Validation ───────────────────────────────────────────────────────
+
+
+def test_invalid_symbol_rejected(api: httpx.Client) -> None:
+    """Bogus symbol fails contract qualification → 400."""
+    resp = api.post(
+        "/ibkr/order",
+        json={
+            "contract": {"symbol": "ZZZZZZ999"},
+            "order": {"action": "BUY", "totalQuantity": 1, "orderType": "MKT"},
+        },
+    )
+    assert resp.status_code == 400
+    assert "qualify" in resp.json()["error"].lower()
+
+
+# ── Order placement + trade listing ──────────────────────────────────
+
+
+def _wait_for_trade(
+    api: httpx.Client, perm_id: int, timeout: float = 10,
+) -> dict[str, Any]:
+    """Poll /ibkr/trades until a trade with the given permId appears."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        resp = api.get("/ibkr/trades")
+        assert resp.status_code == 200
+        trades: list[dict[str, Any]] = resp.json()["trades"]
+        match = [t for t in trades if t["permId"] == perm_id]
+        if match:
+            return match[0]
+        time.sleep(0.5)
+    pytest.fail(f"Trade with permId={perm_id} not found within {timeout}s")
+
+
+def test_market_buy_appears_in_trades(api: httpx.Client) -> None:
+    """Place MKT BUY → verify it appears in trades with fills."""
+    order_resp = api.post(
+        "/ibkr/order",
+        json={
+            "contract": {"symbol": "AAPL"},
+            "order": {"action": "BUY", "totalQuantity": 1, "orderType": "MKT"},
+        },
+    )
+    assert order_resp.status_code == 200, order_resp.text
+    perm_id = order_resp.json()["permId"]
+
+    trade = _wait_for_trade(api, perm_id)
+    assert trade["action"] == "BUY"
+    assert trade["symbol"] == "AAPL"
+    assert trade["orderType"] == "MKT"
+    assert trade["totalQuantity"] == 1.0
+    assert trade["status"] in ("Filled", "PreSubmitted", "Submitted")
+    # MKT orders on paper fill immediately — verify fill details
+    if trade["status"] == "Filled":
+        assert len(trade["fills"]) >= 1
+        fill = trade["fills"][0]
+        assert fill["shares"] > 0
+        assert fill["price"] > 0
+
+
+def test_limit_buy_below_market(api: httpx.Client) -> None:
+    """LMT BUY at $1 should be accepted but not fill."""
+    order_resp = api.post(
+        "/ibkr/order",
+        json={
+            "contract": {"symbol": "AAPL"},
+            "order": {
+                "action": "BUY",
+                "totalQuantity": 1,
+                "orderType": "LMT",
+                "lmtPrice": 1.0,
+            },
+        },
+    )
+    assert order_resp.status_code == 200, order_resp.text
+    data = order_resp.json()
+    assert data["orderType"] == "LMT"
+    assert data["lmtPrice"] == 1.0
+    perm_id = data["permId"]
+
+    trade = _wait_for_trade(api, perm_id)
+    assert trade["lmtPrice"] == 1.0
+    # Should NOT have filled at $1
+    assert trade["status"] in ("Submitted", "PreSubmitted")
+    assert trade["filled"] == 0.0
+
+
+def test_market_sell_appears_in_trades(api: httpx.Client) -> None:
+    """Create an AAPL position, then sell it and verify the trade appears."""
+    # First, establish a position to sell
+    buy_resp = api.post(
+        "/ibkr/order",
+        json={
+            "contract": {"symbol": "AAPL"},
+            "order": {"action": "BUY", "totalQuantity": 1, "orderType": "MKT"},
+        },
+    )
+    assert buy_resp.status_code == 200, buy_resp.text
+    _wait_for_trade(api, buy_resp.json()["permId"])
+
+    # Now sell
+    order_resp = api.post(
+        "/ibkr/order",
+        json={
+            "contract": {"symbol": "AAPL"},
+            "order": {"action": "SELL", "totalQuantity": 1, "orderType": "MKT"},
+        },
+    )
+    assert order_resp.status_code == 200, order_resp.text
+    perm_id = order_resp.json()["permId"]
+
+    trade = _wait_for_trade(api, perm_id)
+    assert trade["action"] == "SELL"
+    assert trade["symbol"] == "AAPL"
+
+
+def test_trades_list_stable(api: httpx.Client) -> None:
+    """Two consecutive GET /ibkr/trades return the same set of permIds."""
+    resp1 = api.get("/ibkr/trades")
+    assert resp1.status_code == 200
+    resp2 = api.get("/ibkr/trades")
+    assert resp2.status_code == 200
+
+    ids1 = {t["permId"] for t in resp1.json()["trades"]}
+    ids2 = {t["permId"] for t in resp2.json()["trades"]}
+    assert ids1 == ids2

@@ -7,6 +7,7 @@ import os
 from ib_async import IB
 
 from client.orders import OrdersNamespace
+from client.trades import TradesNamespace
 
 log = logging.getLogger("ib-client")
 
@@ -30,7 +31,9 @@ class IBClient:
     def __init__(self) -> None:
         self.ib = IB()
         self._retry_delay = INITIAL_RETRY_DELAY
+        self._background_tasks: set[asyncio.Task[None]] = set()
         self.orders = OrdersNamespace(self.ib)
+        self.trades = TradesNamespace(self.ib)
 
     @property
     def is_connected(self) -> bool:
@@ -57,7 +60,9 @@ class IBClient:
 
     def on_disconnect(self) -> None:
         log.warning("Disconnected from IB Gateway — will reconnect")
-        asyncio.ensure_future(self._reconnect())
+        task = asyncio.ensure_future(self._reconnect())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def _reconnect(self) -> None:
         await asyncio.sleep(self._retry_delay)

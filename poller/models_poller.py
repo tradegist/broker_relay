@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class BuySell(str, Enum):
@@ -147,9 +147,11 @@ class Trade(Fill):
     ``price`` is the quantity-weighted average across fills.
     """
 
-    execIds: list[str] = Field(default_factory=list)
-    fillCount: int = 0
+    execIds: list[str]
+    fillCount: int
 
+
+# ── POST /ibkr/poller/run ────────────────────────────────────────────
 
 class WebhookPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -158,28 +160,24 @@ class WebhookPayload(BaseModel):
     errors: list[str]
 
 
-if __name__ == "__main__":
-    import json
-    import sys
+class RunPollResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    schema = WebhookPayload.model_json_schema()
+    trades: list[Trade]
 
-    # Strip per-property "title" keys so json-schema-to-typescript
-    # inlines primitive types (string, number) instead of emitting
-    # a named type alias for every single field.
-    def _strip_titles(obj: object) -> None:
-        if isinstance(obj, dict):
-            for key, val in list(obj.items()):
-                if key == "properties" and isinstance(val, dict):
-                    for prop in val.values():
-                        if isinstance(prop, dict):
-                            prop.pop("title", None)
-                _strip_titles(val)
-        elif isinstance(obj, list):
-            for item in obj:
-                _strip_titles(item)
 
-    _strip_titles(schema)
+# ── GET /health ──────────────────────────────────────────────────────
 
-    json.dump(schema, sys.stdout, indent=2)
-    sys.stdout.write("\n")
+class HealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+
+
+# ── Schema export (used by schema_gen.py → make types) ──────────────
+
+SCHEMA_MODELS: list[type[BaseModel]] = [
+    WebhookPayload,
+    RunPollResponse,
+    HealthResponse,
+]

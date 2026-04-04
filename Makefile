@@ -1,4 +1,4 @@
-.PHONY: setup deploy destroy pause resume sync order poll poll2 test-webhook types test typecheck e2e e2e-up e2e-run e2e-down local-up local-down logs stats gateway ssh help
+.PHONY: setup deploy destroy pause resume sync order poll poll2 test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats gateway ssh help
 
 PYTHON ?= .venv/bin/python3
 E2E_ENV = .env.test
@@ -43,11 +43,11 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli test-webhook $(S)
 
 types: ## Regenerate TypeScript types from Pydantic models
-	$(PYTHON) poller/models_poller.py > types/poller/webhook.schema.json
-	npx --yes json-schema-to-typescript types/poller/webhook.schema.json > types/poller/webhook.d.ts
-	$(PYTHON) remote-client/models_remote_client.py > types/http/order.schema.json
-	npx --yes json-schema-to-typescript types/http/order.schema.json > types/http/order.d.ts
-	@echo "Generated types/poller/webhook.d.ts + types/http/order.d.ts"
+	PYTHONPATH=poller:remote-client $(PYTHON) schema_gen.py models_poller > types/poller/types.schema.json
+	npx --yes json-schema-to-typescript types/poller/types.schema.json > types/poller/types.d.ts
+	PYTHONPATH=poller:remote-client $(PYTHON) schema_gen.py models_remote_client > types/http/types.schema.json
+	npx --yes json-schema-to-typescript types/http/types.schema.json > types/http/types.d.ts
+	@echo "Generated types/poller/types.d.ts + types/http/types.d.ts"
 
 test: ## Run unit tests
 	PYTHONPATH=.:poller:remote-client $(PYTHON) -m pytest -v
@@ -55,6 +55,10 @@ test: ## Run unit tests
 typecheck: ## Run mypy strict type checking
 	MYPYPATH=poller $(PYTHON) -m mypy poller/ cli/test_webhook.py
 	MYPYPATH=remote-client $(PYTHON) -m mypy remote-client/
+	$(PYTHON) -m mypy schema_gen.py
+
+lint: ## Run ruff linter (use FIX=1 to auto-fix)
+	$(PYTHON) -m ruff check poller/ remote-client/ cli/ schema_gen.py $(if $(FIX),--fix)
 
 local-up: ## Start full stack locally (no TLS, direct port access)
 	$(LOCAL_COMPOSE) up -d --build
@@ -78,6 +82,22 @@ e2e-up: ## Start E2E test stack (IB Gateway + webhook-relay + poller)
 			if curl -sf http://localhost:15010/health | grep -q '"connected": true'; then \
 				echo "webhook-relay ready"; break; \
 			fi; \
+			if $(E2E_COMPOSE) logs ib-gateway 2>&1 | grep -q "Existing session detected"; then \
+				echo ""; \
+				echo "ERROR: IB Gateway detected an existing session (another login is active)."; \
+				echo "This is likely the production droplet or another local stack."; \
+				echo "Disconnect that session first, then:  make e2e-down && make e2e-up"; \
+				echo ""; \
+				exit 1; \
+			fi; \
+			if ! $(E2E_COMPOSE) ps ib-gateway --status running -q 2>/dev/null | grep -q .; then \
+				echo ""; \
+				echo "ERROR: ib-gateway container exited unexpectedly."; \
+				echo "Last logs:"; \
+				$(E2E_COMPOSE) logs --tail=20 ib-gateway; \
+				echo ""; \
+				exit 1; \
+			fi; \
 			sleep 10; \
 		done; \
 		echo "Waiting for poller..."; \
@@ -93,6 +113,7 @@ e2e-down: ## Stop and remove E2E test stack
 	$(E2E_COMPOSE) down
 
 e2e-run: ## Run E2E tests (stack must be up)
+	@$(E2E_COMPOSE) restart webhook-relay poller > /dev/null 2>&1 && sleep 3
 	$(PYTHON) -m pytest remote-client/tests/e2e/ poller/tests/e2e/ -v
 
 e2e: ## Run E2E tests against local paper account (starts/stops stack)

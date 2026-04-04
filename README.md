@@ -273,12 +273,12 @@ types/
   package.json               # @tradegist/ibkr-types
   poller/
     index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
-    webhook.d.ts             # Generated from poller/models_poller.py
-    webhook.schema.json      # Intermediate JSON Schema
+    types.d.ts               # Generated from poller/models_poller.py
+    types.schema.json         # Intermediate JSON Schema
   http/
-    index.d.ts               # Re-exports: PlaceOrderRequest, ContractRequest, OrderRequest, OrderResponse
-    order.d.ts               # Generated from remote-client/models_remote_client.py
-    order.schema.json        # Intermediate JSON Schema
+    index.d.ts               # Re-exports: PlaceOrderPayload, ContractPayload, OrderPayload, PlaceOrderResponse
+    types.d.ts               # Generated from remote-client/models_remote_client.py
+    types.schema.json         # Intermediate JSON Schema
 ```
 
 Usage:
@@ -287,7 +287,7 @@ Usage:
 import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-types";
 
 const payload: IbkrPoller.WebhookPayload = ...;
-const order: IbkrHttp.PlaceOrderRequest = ...;
+const order: IbkrHttp.PlaceOrderPayload = ...;
 ```
 
 Types are auto-generated from the Pydantic models via `make types`. The package is not yet published to npm — the API is still evolving.
@@ -590,10 +590,10 @@ make sync LOCAL_FILES=1  # deploy to your droplet
     ├── package.json
     ├── poller/                # IbkrPoller namespace
     │   ├── index.d.ts
-    │   └── webhook.d.ts       # Generated from poller/models_poller.py
+    │   └── types.d.ts         # Generated from poller/models_poller.py
     └── http/                  # IbkrHttp namespace
         ├── index.d.ts
-        └── order.d.ts         # Generated from remote-client/models_remote_client.py
+        └── types.d.ts         # Generated from remote-client/models_remote_client.py
 
 ```
 

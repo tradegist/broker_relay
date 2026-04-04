@@ -1,6 +1,10 @@
 export type {
-  PlaceOrderRequest,
-  ContractRequest,
-  OrderRequest,
-  OrderResponse,
-} from "./order";
+  PlaceOrderPayload,
+  ContractPayload,
+  OrderPayload,
+  PlaceOrderResponse,
+  HealthResponse,
+  FillDetail,
+  TradeDetail,
+  ListTradesResponse,
+} from "./types";

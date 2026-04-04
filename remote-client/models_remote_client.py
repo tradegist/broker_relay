@@ -19,9 +19,9 @@ SecType = Literal[
 TimeInForce = Literal["DAY", "GTC", "IOC", "GTD", "OPG", "FOK", "DTC"]
 
 
-# ── Request models ───────────────────────────────────────────────────
+# ── POST /ibkr/order ─────────────────────────────────────────────────
 
-class ContractRequest(BaseModel):
+class ContractPayload(BaseModel):
     """Contract fields for identifying the instrument (mirrors ib_async.Contract)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -33,7 +33,7 @@ class ContractRequest(BaseModel):
     primaryExchange: str = ""
 
 
-class OrderRequest(BaseModel):
+class OrderPayload(BaseModel):
     """Order fields for specifying the trade (mirrors ib_async.Order)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -46,22 +46,21 @@ class OrderRequest(BaseModel):
     outsideRth: bool = False
 
 
-class PlaceOrderRequest(BaseModel):
+class PlaceOrderPayload(BaseModel):
     """Top-level request body for POST /ibkr/order."""
 
     model_config = ConfigDict(extra="forbid")
 
-    contract: ContractRequest
-    order: OrderRequest
+    contract: ContractPayload
+    order: OrderPayload
 
 
-# ── Response models ──────────────────────────────────────────────────
-
-class OrderResponse(BaseModel):
+class PlaceOrderResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: str
     orderId: int
+    permId: int
     action: Action
     symbol: str
     totalQuantity: float
@@ -69,48 +68,74 @@ class OrderResponse(BaseModel):
     lmtPrice: float | None = None
 
 
-if __name__ == "__main__":
-    import json
-    import sys
+# ── GET /health ──────────────────────────────────────────────────────
 
-    # Generate a combined schema with all types reachable from the root.
-    # json-schema-to-typescript only emits types it can reach, so we use
-    # anyOf to reference both PlaceOrderRequest and OrderResponse.
-    req_schema = PlaceOrderRequest.model_json_schema()
-    resp_schema = OrderResponse.model_json_schema()
+class HealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    defs = req_schema.get("$defs", {})
-    defs.update(resp_schema.get("$defs", {}))
+    connected: bool
+    tradingMode: str
 
-    # Move both models into $defs
-    defs["PlaceOrderRequest"] = {
-        k: v for k, v in req_schema.items() if k != "$defs"
-    }
-    defs["OrderResponse"] = {
-        k: v for k, v in resp_schema.items() if k != "$defs"
-    }
 
-    schema = {
-        "$defs": defs,
-        "anyOf": [
-            {"$ref": "#/$defs/PlaceOrderRequest"},
-            {"$ref": "#/$defs/OrderResponse"},
-        ],
-    }
+# ── GET /ibkr/trades ─────────────────────────────────────────────────
 
-    def _strip_titles(obj: object) -> None:
-        if isinstance(obj, dict):
-            for key, val in list(obj.items()):
-                if key == "properties" and isinstance(val, dict):
-                    for prop in val.values():
-                        if isinstance(prop, dict):
-                            prop.pop("title", None)
-                _strip_titles(val)
-        elif isinstance(obj, list):
-            for item in obj:
-                _strip_titles(item)
+class FillDetail(BaseModel):
+    """Single execution fill within a trade."""
 
-    _strip_titles(schema)
+    model_config = ConfigDict(extra="forbid")
 
-    json.dump(schema, sys.stdout, indent=2)
-    sys.stdout.write("\n")
+    execId: str
+    time: str
+    exchange: str
+    side: str
+    shares: float
+    price: float
+    commission: float
+    commissionCurrency: str
+    realizedPNL: float
+
+
+class TradeDetail(BaseModel):
+    """A trade with its order info, status, and fills."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Order identification
+    orderId: int
+    permId: int
+    action: str  # str not Action — IB may return values beyond BUY/SELL for reads
+    totalQuantity: float
+    orderType: str  # str not OrderType — IB returns STP, TRAIL, etc. for existing orders
+    lmtPrice: float | None = None
+    tif: TimeInForce
+
+    # Contract
+    symbol: str
+    secType: SecType
+    exchange: str
+    currency: str
+
+    # Status
+    status: str
+    filled: float
+    remaining: float
+    avgFillPrice: float
+
+    # Fills
+    fills: list[FillDetail]
+
+
+class ListTradesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trades: list[TradeDetail]
+
+
+# ── Schema export (used by schema_gen.py → make types) ──────────────
+
+SCHEMA_MODELS: list[type[BaseModel]] = [
+    PlaceOrderPayload,
+    PlaceOrderResponse,
+    HealthResponse,
+    ListTradesResponse,
+]

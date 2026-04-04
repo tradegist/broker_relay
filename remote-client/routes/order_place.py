@@ -6,7 +6,7 @@ from aiohttp import web
 from pydantic import ValidationError
 
 from client import IBClient
-from models_remote_client import PlaceOrderRequest
+from models_remote_client import PlaceOrderPayload
 
 log = logging.getLogger("routes")
 
@@ -25,7 +25,7 @@ async def handle_order(request: web.Request) -> web.Response:
         return web.json_response({"error": "Invalid JSON"}, status=400)
 
     try:
-        req = PlaceOrderRequest.model_validate(body)
+        req = PlaceOrderPayload.model_validate(body)
     except ValidationError as exc:
         return web.json_response(
             {"error": exc.errors(include_url=False)}, status=400

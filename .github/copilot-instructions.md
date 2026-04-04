@@ -3,6 +3,8 @@
 ## Code Quality (MANDATORY)
 
 - **Always apply best practices by default.** Do not ask the user whether to follow a best practice — just do it. Use idiomatic Python naming, file organization, and patterns. When there is a clearly better approach (naming, structure, error handling), use it directly and explain why.
+- **No unused imports.** After writing or editing any Python file, verify every `import` is actually used in the file. Remove any that are not. This applies to new files and edits to existing files alike.
+- **Run `make lint` after every code change.** Ruff enforces unused imports (F401), import ordering (I001), unused variables, common pitfalls (bugbear), and modern Python idioms. If ruff fails, fix before committing. Use `make lint FIX=1` to auto-fix safe issues (import sorting, etc.).
 
 ## Security Rules (MANDATORY)
 
@@ -25,15 +27,18 @@
   2. `make e2e-run` — run the tests.
   3. Fix code → `make e2e-run` → repeat until all tests pass. Volume mounts keep code in sync — no rebuild needed.
   4. `make e2e-down` — tear down **only after all tests pass**. Never tear down between iterations.
-- When modifying any Python file (`.py`), always run `make test` and `make typecheck` and confirm both pass before deploying.
+- When modifying any Python file (`.py`), always run `make test`, `make typecheck`, and `make lint` and confirm all pass before deploying.
 - **Every Python file must be covered by `make typecheck`.** When adding a new Python service, package, or standalone script, immediately add it to the mypy invocation in the Makefile. No Python file may exist outside mypy's scope.
 - After modifying any model in `poller/models_poller.py` or `remote-client/models_remote_client.py`, also run `make types` to regenerate the TypeScript definitions.
 - **Always verify type safety by breaking it first.** After any refactor that touches types or model construction, deliberately introduce a type error (e.g. pass a `str` where `float` is expected), run `make typecheck`, and confirm it **fails**. Then revert and confirm it passes. Never assume mypy catches something — prove it.
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)` — mypy cannot type-check `**dict[str, Any]`. Use explicit keyword arguments or `model_copy(update=...)` instead.
+- **Prefer strict `Literal` types over bare `str` on Pydantic models.** Financial applications demand precision — a `str` field silently accepts typos and invalid values. When a field has a known set of valid values (e.g. `Action`, `OrderType`, `SecType`, `TimeInForce`), always use the existing `Literal` type. Only fall back to `str` when the external source (e.g. IB Gateway) genuinely returns unbounded values — and document why with an inline comment. At the mapping boundary (e.g. `_map_trade`), use `cast()` so mypy is satisfied and Pydantic validates at runtime.
+- **No `# type: ignore` without justification.** Do not bypass the type checker. Fix the root cause instead — use proper type annotations, import the correct type, widen a dict annotation, or use `cast()`. If suppression is truly unavoidable (e.g. untyped third-party library), the comment must include a reason: `# type: ignore[attr-defined] # ib_async.Foo has no stubs`. A bare `# type: ignore` with no explanation is never acceptable.
 
 ## Pydantic Best Practices
 
-- **Use `Field(default_factory=list)`** for mutable defaults (`list`, `dict`). Never use bare `[]` or `{}` as default values — it risks shared mutable state.
+- **Use `Field(default_factory=list)`** for mutable defaults (`list`, `dict`) **only when the field is genuinely optional.** Never use bare `[]` or `{}` as default values — it risks shared mutable state.
+- **Do not add defaults to fields that are always populated.** A default (`= 0`, `= ""`, `= Field(default_factory=list)`) makes the field optional in the generated JSON Schema and TypeScript types (e.g. `fillCount?: number`). If the construction code always provides the value, the field must be required (no default) so the schema reflects the true contract. Only use defaults for fields that are legitimately absent in some cases (e.g. XML attributes that may be missing).
 - **Use `ConfigDict(extra="forbid")`** on models that define an external contract (e.g. webhook payloads, API responses). This produces `additionalProperties: false` in the JSON Schema, keeping generated TypeScript types strict (no `[k: string]: unknown`).
 - **Docstrings on `parse_fills()` and similar claim "never raises"** — ensure the implementation matches. Wrap any call that can throw (e.g. `ET.fromstring()`) in try/except and return errors in the result tuple.
 
@@ -108,9 +113,24 @@ Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses
 - **`docker-compose.test.yml`** at project root defines the test stack (ib-gateway + webhook-relay only, no Caddy/poller/VNC).
 - **`make e2e`** starts the stack, waits for connection, runs pytest, then tears down. Always cleans up, even on test failure.
 - **`make e2e-up` / `make e2e-down`** for manual stack management during debugging.
+- **`make e2e-run`** restarts `webhook-relay` and `poller` containers (to pick up code changes from volume mounts), then runs the E2E tests. Safe to call repeatedly during development — no need to rebuild or restart manually.
 - **Test API runs on `localhost:15010`** with hardcoded token `test-token`.
 - **No healthcheck on `ib-gateway`** — the `IBClient.connect()` handles retry with exponential backoff, same as production.
 - **Paper accounts require no 2FA**, so the E2E stack is fully automated.
+- **Session conflict detection** — `make e2e-up` checks `ib-gateway` logs for `"Existing session detected"` during startup. IBKR only allows one session per account — if the production droplet or local-dev stack is connected with the same credentials, the test gateway will be rejected.
+
+## Test File Convention
+
+- **Unit tests are colocated** next to the source file they test: `flex_parser.py` → `test_flex_parser.py`, `orders.py` → `test_orders.py`.
+- **E2E tests live in `tests/e2e/`** within each service, since they test multiple components together rather than a single source file.
+- **`make test`** runs all unit tests (both services). **`make e2e-run`** runs all E2E tests (requires Docker stack).
+- **Always scope `unittest.mock.patch`.** Never call `patch.start()` at module level without a corresponding `patch.stop()` — the patched value leaks into every test module that runs afterward. Use one of these patterns instead:
+  - **`setUpModule()` / `tearDownModule()`** — for module-wide patches (e.g. `API_TOKEN` that all tests in the file need).
+  - **`self.addCleanup(patcher.stop)`** in `setUp()` — for class-scoped patches.
+  - **`with patch(...):`** inside the test — for single-test patches.
+  - **`@patch(...)`** decorator — for single-test or single-class patches.
+  - Never use bare `_patcher.start()` without registering a `.stop()`.
+- **No cross-test dependencies.** Every test must be self-contained — it must not rely on state created by a previous test (e.g. a position opened by an earlier buy test). Pytest does not guarantee execution order, and tests may run selectively or in parallel. If a test needs preconditions, create them within the test itself or via an explicit fixture.
 
 ## Remote Client Structure
 
@@ -123,13 +143,21 @@ remote-client/
   client/                  # IB Gateway client (namespace delegation)
     __init__.py            # IBClient class (connection management)
     orders.py              # OrdersNamespace: place(contract_req, order_req)
+    test_orders.py         # Tests for orders namespace
+    trades.py              # TradesNamespace: list()
+    test_trades.py         # Tests for trades namespace
   routes/                  # HTTP route handlers
     __init__.py            # Orchestrator: create_routes()
     middlewares.py         # Auth middleware (Bearer token)
     order_place.py         # POST /ibkr/order
+    test_order_place.py    # Tests for order_place route
+    trades_list.py         # GET /ibkr/trades
+    test_trades_list.py    # Tests for trades_list route
     health.py              # GET /health
   tests/e2e/               # E2E tests (paper account)
     conftest.py            # httpx fixtures (api + anon_api)
+    test_smoke.py          # Health + auth smoke tests
+    test_trades.py         # Order placement + trade listing
     .env.test.example      # Template for paper credentials
 ```
 
@@ -166,16 +194,34 @@ poller/
 
 This project has **two independent model files** with unique names to avoid import ambiguity:
 
-| File                                    | Domain                      | Contains                                                                                 |
-| --------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
-| `poller/models_poller.py`               | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                 |
-| `remote-client/models_remote_client.py` | Order API (inbound)         | `ContractRequest`, `OrderRequest`, `PlaceOrderRequest`, `OrderResponse` — REST API types |
+| File                                    | Domain                      | Contains                                                                                      |
+| --------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------- |
+| `poller/models_poller.py`               | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                      |
+| `remote-client/models_remote_client.py` | Order API (inbound)         | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types |
 
 - **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `poller/` and `remote-client/` are on `sys.path` (via the `.pth` file). Use `from models_poller import ...` and `from models_remote_client import ...` everywhere.
 - `models_poller.py` is the source of truth for `IbkrPoller` TypeScript types (`make types`).
 - `models_remote_client.py` is the source of truth for `IbkrHttp` TypeScript types (`make types`).
 - `models_remote_client.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
 - Both use `ConfigDict(extra="forbid")` for strict validation.
+
+## Naming Convention for API Models
+
+All public-facing Pydantic models follow the pattern **`{Action}{Resource}{InterfaceType}`**:
+
+| Suffix     | Meaning                              | Example              |
+| ---------- | ------------------------------------ | -------------------- |
+| `Payload`  | Request body (POST/PUT JSON payload) | `PlaceOrderPayload`  |
+| `Response` | Response body returned to the caller | `PlaceOrderResponse` |
+| `Params`   | Query parameters (GET requests)      | `ListTradesParams`   |
+
+Rules:
+
+- **Payload** = what the client sends in the body. Nested sub-models also use `Payload` (e.g. `ContractPayload`, `OrderPayload`).
+- **Response** = what the server returns. Prefixed with the action to avoid ambiguity (`PlaceOrderResponse`, not `OrderResponse`).
+- **Params** = URL query parameters, used for GET endpoints.
+- Domain types (`Action`, `OrderType`, `SecType`, `TimeInForce`, `BuySell`) have no suffix — they are not API interface types.
+- **Group by endpoint, not by type.** All interfaces for a single endpoint (Payload, Response, Params) must live together in the same section of their `models_*.py` file. Do not separate Payloads and Responses into different blocks — group them by the action they belong to (e.g. all `PlaceOrder*` models together, all `ListTrades*` models together).
 
 ## Order API Payload
 
@@ -217,15 +263,15 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
     package.json               # @tradegist/ibkr-types
     poller/
       index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
-      webhook.d.ts             # Generated from poller/models_poller.py
-      webhook.schema.json      # Intermediate JSON Schema
+      types.d.ts               # Generated from poller/models_poller.py
+      types.schema.json         # Intermediate JSON Schema
     http/
-      index.d.ts               # Re-exports: PlaceOrderRequest, ContractRequest, OrderRequest, OrderResponse
-      order.d.ts               # Generated from remote-client/models_remote_client.py
-      order.schema.json        # Intermediate JSON Schema
+      index.d.ts               # Re-exports: PlaceOrderPayload, ContractPayload, OrderPayload, PlaceOrderResponse
+      types.d.ts               # Generated from remote-client/models_remote_client.py
+      types.schema.json         # Intermediate JSON Schema
   ```
 - **Usage:** `import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-types"`
-- Both model files have `__main__` blocks that output JSON Schema to stdout (used by the Makefile).
+- Each model file declares a `SCHEMA_MODELS` list at the bottom — `schema_gen.py` reads it to generate the JSON Schema. **To export a new model to TypeScript, append it to `SCHEMA_MODELS` in the relevant `models_*.py` file and update the corresponding `types/*/index.d.ts` re-exports.**
 
 ## Code Style
 
@@ -247,6 +293,7 @@ make resume    # Restore from snapshot
 make poll      # Trigger immediate Flex poll
 make order     # Place an order
 make e2e       # Run E2E tests (paper account)
+make lint      # Run ruff linter (FIX=1 to auto-fix)
 ```
 
 Direct CLI (no Make required, works on Windows):

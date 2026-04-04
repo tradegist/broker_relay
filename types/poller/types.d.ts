@@ -5,6 +5,7 @@
  * and run json-schema-to-typescript to regenerate this file.
  */
 
+export type TypesSchema = WebhookPayload | RunPollResponse | HealthResponse;
 export type BuySell = "BUY" | "SELL";
 
 export interface WebhookPayload {
@@ -104,6 +105,12 @@ export interface Trade {
   commodityType?: string;
   fineness?: string;
   weight?: string;
-  execIds?: string[];
-  fillCount?: number;
+  execIds: string[];
+  fillCount: number;
+}
+export interface RunPollResponse {
+  trades: Trade[];
+}
+export interface HealthResponse {
+  status: string;
 }
