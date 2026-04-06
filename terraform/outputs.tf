@@ -8,9 +8,9 @@ output "vnc_url" {
   value       = "https://${var.vnc_domain}"
 }
 
-output "trade_url" {
-  description = "Trade API base URL"
-  value       = "https://${var.trade_domain}"
+output "site_url" {
+  description = "Site base URL"
+  value       = "https://${var.site_domain}"
 }
 
 output "ssh_private_key" {

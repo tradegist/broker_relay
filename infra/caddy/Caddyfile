@@ -1,25 +1,7 @@
-{$VNC_DOMAIN} {
-    handle /gateway/* {
-        uri strip_prefix /gateway
-        reverse_proxy gateway-controller:9000
-    }
-
-    handle {
-        reverse_proxy novnc:8080
-    }
+{$SITE_DOMAIN} {
+    import /etc/caddy/sites/*.caddy
+    import /etc/caddy/shared-sites/*.caddy
 }
 
-{$TRADE_DOMAIN} {
-    handle /ibkr/poller/2/* {
-        uri replace /ibkr/poller/2 /ibkr/poller
-        reverse_proxy poller-2:8000
-    }
-
-    handle /ibkr/poller/* {
-        reverse_proxy poller:8000
-    }
-
-    handle {
-        reverse_proxy webhook-relay:5000
-    }
-}
+import /etc/caddy/domains/*.caddy
+import /etc/caddy/shared-domains/*.caddy

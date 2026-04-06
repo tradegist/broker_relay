@@ -4,13 +4,14 @@
 
 - **Always apply best practices by default.** Do not ask the user whether to follow a best practice — just do it. Use idiomatic Python naming, file organization, and patterns. When there is a clearly better approach (naming, structure, error handling), use it directly and explain why.
 - **No unused imports.** After writing or editing any Python file, verify every `import` is actually used in the file. Remove any that are not. This applies to new files and edits to existing files alike.
+- **No `assert` for runtime guards.** `assert` is stripped under `python -O`, turning invariant checks into silent `None`/`AttributeError`. Use `if ... raise RuntimeError(...)` (or `die()`) for any check that must hold at runtime.
 - **Run `make lint` after every code change.** Ruff enforces unused imports (F401), import ordering (I001), unused variables, common pitfalls (bugbear), and modern Python idioms. If ruff fails, fix before committing. Use `make lint FIX=1` to auto-fix safe issues (import sorting, etc.).
 
 ## Security Rules (MANDATORY)
 
 - **No hardcoded credentials** — passwords, API tokens, secrets, and keys MUST come from environment variables (`.env` file or `TF_VAR_*`). Never write real values in source files.
 - **No hardcoded IPs** — use `DROPLET_IP` from `.env`. In documentation, use `1.2.3.4` as placeholder.
-- **No hardcoded domains** — use `example.com` variants (`vnc.example.com`, `trade.example.com`) in docs and code. Actual domains are loaded at runtime via `VNC_DOMAIN` / `TRADE_DOMAIN` env vars.
+- **No hardcoded domains** — use `example.com` variants (`vnc.example.com`, `trade.example.com`) in docs and code. Actual domains are loaded at runtime via `VNC_DOMAIN` / `SITE_DOMAIN` env vars.
 - **No email addresses or personal info** — never write real names, emails, or account IDs in committed files. Use `UXXXXXXX` for IBKR account examples.
 - **No logging of secrets or sensitive operational data** — never `log.info()` or `print()` tokens, passwords, or API keys. Log actions and outcomes, not credential values. When adding any `log.info()` or `log.debug()` call, check whether the logged value contains sensitive fields (e.g. `accountId`, `acctAlias`, account numbers, IPs, domains). Never log full model dumps at `info` level — use `log.debug` with explicit field exclusion: `log.debug("Trade: %s", trade.model_dump_json(exclude={"accountId", "acctAlias"}))`. Prefer logging counts, symbols, and statuses over full objects.
 - **`.env`, `*.tfvars`, and `.env.test` are gitignored** — never commit them. Use `.env.example` / `.env.test.example` with placeholder values as reference.
@@ -34,6 +35,7 @@
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)` — mypy cannot type-check `**dict[str, Any]`. Use explicit keyword arguments or `model_copy(update=...)` instead.
 - **Prefer strict `Literal` types over bare `str` on Pydantic models.** Financial applications demand precision — a `str` field silently accepts typos and invalid values. When a field has a known set of valid values (e.g. `Action`, `OrderType`, `SecType`, `TimeInForce`), always use the existing `Literal` type. Only fall back to `str` when the external source (e.g. IB Gateway) genuinely returns unbounded values — and document why with an inline comment. At the mapping boundary (e.g. `_map_trade`), use `cast()` so mypy is satisfied and Pydantic validates at runtime.
 - **No `# type: ignore` without justification.** Do not bypass the type checker. Fix the root cause instead — use proper type annotations, import the correct type, widen a dict annotation, or use `cast()`. If suppression is truly unavoidable (e.g. untyped third-party library), the comment must include a reason: `# type: ignore[attr-defined] # ib_async.Foo has no stubs`. A bare `# type: ignore` with no explanation is never acceptable.
+- **Use `@overload` for sentinel-default patterns.** When a function accepts an optional default via a sentinel (e.g. `_UNSET = object()`), use `@overload` to express the two call signatures (`def f(key: str) -> str` and `def f(key: str, default: str) -> str`) instead of `# type: ignore` on the return. Use `cast()` in the implementation body for the default branch.
 
 ## Pydantic Best Practices
 
@@ -85,7 +87,50 @@ Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 | `gateway-controller` | Lightweight sidecar — starts ib-gateway container via Docker socket            |
 
 All secrets are injected via `.env` → `environment` in `docker-compose.yml`.
-Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses `{$VNC_DOMAIN}` / `{$TRADE_DOMAIN}` syntax.
+Caddy reads `VNC_DOMAIN` and `SITE_DOMAIN` from env vars — the Caddyfile uses `{$VNC_DOMAIN}` / `{$SITE_DOMAIN}` syntax.
+
+### Caddy Snippet Structure
+
+The Caddyfile uses `import` directives to compose routing from snippet files:
+
+```
+infra/caddy/
+  Caddyfile              # Shell: imports from sites/, domains/, and shared dirs
+  sites/
+    ibkr.caddy           # SITE_DOMAIN route handlers (handle /ibkr/*)
+  domains/
+    ibkr-vnc.caddy       # VNC_DOMAIN site block (full site definition)
+```
+
+Shared projects deploy snippets to `/opt/caddy-shared/{sites,domains}/` on the droplet (not into the host project's directory). The host Caddy mounts both:
+- `./infra/caddy/sites/` → `/etc/caddy/sites/` (host project's own routes)
+- `/opt/caddy-shared/sites/` → `/etc/caddy/shared-sites/` (shared projects' routes)
+- Same pattern for `domains/` and `shared-domains/`.
+
+During shared deploy, snippet files are **templated** — all `{$VAR}` placeholders are replaced with literal env var values from the shared project's `.env`. This avoids requiring the host Caddy container to have the shared project's env vars.
+
+- **`sites/*.caddy`** contain `handle` blocks imported inside the `{$SITE_DOMAIN}` site definition. Each project writes one snippet (e.g. `ibkr.caddy`, `kraken.caddy`). Routes must be prefixed with the project name (`/ibkr/*`, `/kraken/*`) to avoid collisions.
+- **`domains/*.caddy`** contain full site definitions (e.g. `{$VNC_DOMAIN} { ... }`), imported at the top level.
+- This structure allows multiple projects to share a single Caddy instance on the same droplet.
+
+## Deployment Modes
+
+The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validated before any deploy or sync).
+
+### Standalone Mode (`DEPLOY_MODE=standalone`)
+
+- Set `DO_API_TOKEN` in `.env`. `make deploy` runs Terraform to create a new droplet, firewall, and reserved IP, then the CLI rsyncs project files, pushes `.env`, and runs `docker compose up -d --build`.
+- Terraform only creates infrastructure — cloud-init installs Docker and creates the project directory. The CLI handles all file transfer and service startup.
+- After deploy, add `DROPLET_IP` from terraform output to `.env` for `make sync`.
+- `DO_API_TOKEN` can be removed after first deploy for security — the mode is determined by `DEPLOY_MODE`, not by token presence.
+
+### Shared Mode (`DEPLOY_MODE=shared`)
+
+- Set `DROPLET_IP` and `SSH_KEY` in `.env` (no `DO_API_TOKEN` needed).
+- `make deploy` rsyncs files, pushes `.env`, and starts services using `docker-compose.shared.yml` overlay.
+- The shared overlay disables Caddy (the host project runs it) and connects all containers to `relay-net` external Docker network.
+- Caddy snippet files (`infra/caddy/sites/ibkr.caddy`, `infra/caddy/domains/ibkr-vnc.caddy`) must be deployed to the host project's Caddy to enable routing.
+- `make sync` uses the shared compose overlay automatically.
 
 ## Memory & Droplet Sizing
 
@@ -284,7 +329,7 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
 All commands available via `make` or `python3 -m cli <command>`:
 
 ```bash
-make deploy    # Terraform init + apply (reads .env)
+make deploy    # Standalone: Terraform | Shared: rsync + compose (reads .env)
 make sync      # Push .env to droplet + restart services
 make sync LOCAL_FILES=1  # rsync files + rebuild + restart (full code deploy)
 make destroy   # Terraform destroy
@@ -326,10 +371,11 @@ python3 -m cli poll 2
 ```
 .env.example            # Template — copy to .env and fill in real values
 docker-compose.yml      # All 6 services
+docker-compose.shared.yml # Shared-mode overlay (disables Caddy, uses relay-net)
 cli/                    # Python CLI (operator scripts)
   __init__.py           # Shared helpers (env loading, SSH, DO API, validation)
   __main__.py           # Entry point (lazy dispatch via importlib)
-  deploy.py             # Terraform init + apply
+  deploy.py             # Standalone (Terraform) or shared (rsync + compose)
   destroy.py            # Terraform destroy
   pause.py              # Snapshot + delete droplet
   resume.py             # Restore from snapshot
@@ -342,6 +388,10 @@ services/               # Business-logic services (user-facing features)
     models_poller.py    # Pydantic models: Fill, Trade, WebhookPayload, BuySell
 infra/                  # Infrastructure backbone (no business logic)
   caddy/Caddyfile       # Reverse proxy config (uses env vars for domains)
+  caddy/sites/          # Route snippets imported inside {$SITE_DOMAIN}
+    ibkr.caddy          # /ibkr/* routes (poller, webhook-relay)
+  caddy/domains/        # Full site blocks imported at top level
+    ibkr-vnc.caddy      # {$VNC_DOMAIN} block (novnc + gateway-controller)
   gateway-controller/   # CGI sidecar (Alpine, busybox httpd)
   novnc/index.html      # Custom VNC UI (Tailwind CSS)
 types/                  # @tradegist/ibkr-types npm package (IbkrPoller + IbkrHttp namespaces)
