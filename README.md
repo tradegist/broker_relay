@@ -259,6 +259,8 @@ make local-up     # build and start all services
 make local-down   # stop and remove containers
 ```
 
+`make local-up` reads `.env` and honors `POLLER_ENABLED` and `REMOTE_CLIENT_ENABLED`. You can also override per-command with `make local-up POLLER=0` or `make local-up REMOTE_CLIENT=0`.
+
 Endpoints after startup:
 
 | Service   | URL                           |
@@ -423,22 +425,31 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make destroy     Permanently destroy all infrastructure
   make pause       Snapshot droplet + delete (save costs)
   make resume      Restore droplet from snapshot
-  make sync        Push .env + restart (S=gateway B=1 LOCAL_FILES=1)
-  make order       Place a stock order (e.g. make order Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE] [TIF=GTC] [RTH=1])
+  make setup       Create .venv and install all dependencies
+  make deploy      Deploy infrastructure (Terraform + Docker)
+  make destroy     Permanently destroy all infrastructure
+  make pause       Snapshot droplet + delete (save costs)
+  make resume      Restore droplet from snapshot
+  make sync        Push .env + restart (S=gateway B=1 LOCAL_FILES=1 SKIP_E2E=1)
+  make order       Place a stock order (Q=2 SYM=TSLA T=MKT [P=] [CUR=EUR] [EX=LSE] [TIF=GTC] [RTH=1])
   make poll        Trigger an immediate Flex poll (V=1 verbose, DEBUG=1 XML, REPLAY=N resend)
+  make poll2       Trigger immediate Flex poll (second poller)
   make test-webhook Send sample trades to webhook endpoint
-  make test         Run unit tests (pytest)
-  make typecheck    Run mypy strict type checking
-  make e2e          Run E2E tests against local paper account
-  make e2e-up       Start E2E test stack (IB Gateway + remote-client)
-  make e2e-run      Run E2E tests (stack must be up)
-  make e2e-down     Stop and remove E2E test stack
+  make types       Regenerate TypeScript types from Pydantic models
+  make test        Run unit tests (pytest)
+  make typecheck   Run mypy strict type checking
+  make lint        Run ruff linter (FIX=1 to auto-fix)
+  make e2e         Run E2E tests against local paper account
+  make e2e-up      Start E2E test stack (IB Gateway + remote-client)
+  make e2e-run     Run E2E tests (stack must be up)
+  make e2e-down    Stop and remove E2E test stack
   make local-up    Start full stack locally (no TLS, direct port access)
   make local-down  Stop local stack
   make gateway     Start IB Gateway container (then open VNC for 2FA)
   make logs        Stream poller logs (Ctrl+C to stop)
   make stats       Show container resource usage
   make ssh         SSH into the droplet
+  make help        Show available commands
 ```
 
 You can also invoke the CLI directly with `python3 -m cli <command>` — useful on Windows or when Make is not available:
@@ -484,6 +495,11 @@ make logs                                      # stream poller logs
 make logs S=remote-client                      # stream relay logs
 make logs S=ib-gateway                         # stream gateway logs
 make gateway                                   # start gateway + complete 2FA in browser
+```
+
+> **Note:** `make order` and `make gateway` require the gateway stack. They exit with an error if `REMOTE_CLIENT_ENABLED=false`.
+
+```bash
 make pause                           # snapshot + delete droplet
 make resume                          # restore from snapshot
 ```

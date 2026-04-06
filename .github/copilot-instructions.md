@@ -224,6 +224,7 @@ services/remote-client/
     test_smoke.py          # Health + auth smoke tests
     test_trades.py         # Order placement + trade listing
     test_listener.py       # Listener webhook E2E (skips when market closed)
+    test_remote_client_enabled.py  # Tests REMOTE_CLIENT_ENABLED toggle
     .env.test.example      # Template for paper credentials
 ```
 
@@ -248,6 +249,10 @@ services/poller/
     __init__.py            # Orchestrator: create_routes(), start_api_server()
     middlewares.py         # Auth middleware (Bearer token)
     run.py                 # POST /ibkr/poller/run handler
+  tests/e2e/               # E2E tests
+    conftest.py
+    test_smoke.py
+    test_poller_enabled.py   # Tests POLLER_ENABLED toggle
   Dockerfile
   requirements.txt
 ```
@@ -427,6 +432,7 @@ python3 -m cli poll 2
 .env.example            # Template — copy to .env and fill in real values
 docker-compose.yml      # All 6 services
 docker-compose.shared.yml # Shared-mode overlay (disables Caddy, uses relay-net)
+docker-compose.local.yml  # Local dev override (direct port access, no TLS)
 cli/                    # Python CLI (operator scripts)
   __init__.py           # Shared helpers (env loading, SSH, DO API, validation)
   __main__.py           # Entry point (lazy dispatch via importlib)
