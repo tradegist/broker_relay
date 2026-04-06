@@ -327,24 +327,25 @@ For automated deployment without local Terraform:
 
 All configuration is via environment variables in `.env`:
 
-| Variable                | Required | Default            | Description                                                          |
-| ----------------------- | -------- | ------------------ | -------------------------------------------------------------------- |
-| `DO_API_TOKEN`          | Yes      | —                  | DigitalOcean API token                                               |
-| `TWS_USERID`            | Yes      | —                  | IBKR account username                                                |
-| `TWS_PASSWORD`          | Yes      | —                  | IBKR account password                                                |
-| `TRADING_MODE`          | No       | `paper`            | `paper` or `live`                                                    |
-| `VNC_SERVER_PASSWORD`   | Yes      | —                  | Password for noVNC browser access                                    |
-| `VNC_DOMAIN`            | Yes      | —                  | Domain for VNC access (see [Domains & HTTPS](#domains--https))       |
-| `SITE_DOMAIN`           | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))        |
-| `API_TOKEN`             | Yes      | —                  | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)        |
-| `IBKR_FLEX_TOKEN`       | Yes      | —                  | Flex Web Service token (from Client Portal)                          |
-| `IBKR_FLEX_QUERY_ID`    | Yes      | —                  | Flex Query ID (Trade Confirmation or Activity)                       |
-| `TARGET_WEBHOOK_URL`    | No       | —                  | Webhook endpoint (empty = log-only dry-run)                          |
-| `WEBHOOK_SECRET`        | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook) |
-| `NOTIFIERS`             | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run       |
-| `POLLER_ENABLED`        | No       | `true`             | Set to `false` to disable the poller container entirely              |
-| `POLL_INTERVAL_SECONDS` | No       | `600`              | Flex poll interval (seconds)                                         |
-| `TIME_ZONE`             | No       | `America/New_York` | Timezone (tz database format)                                        |
+| Variable                | Required | Default            | Description                                                                                           |
+| ----------------------- | -------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
+| `DO_API_TOKEN`          | Yes      | —                  | DigitalOcean API token                                                                                |
+| `TWS_USERID`            | Yes      | —                  | IBKR account username                                                                                 |
+| `TWS_PASSWORD`          | Yes      | —                  | IBKR account password                                                                                 |
+| `TRADING_MODE`          | No       | `paper`            | `paper` or `live`                                                                                     |
+| `VNC_SERVER_PASSWORD`   | Yes      | —                  | Password for noVNC browser access                                                                     |
+| `VNC_DOMAIN`            | Yes      | —                  | Domain for VNC access (see [Domains & HTTPS](#domains--https))                                        |
+| `SITE_DOMAIN`           | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))                                         |
+| `API_TOKEN`             | Yes      | —                  | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)                                         |
+| `IBKR_FLEX_TOKEN`       | Yes      | —                  | Flex Web Service token (from Client Portal)                                                           |
+| `IBKR_FLEX_QUERY_ID`    | Yes      | —                  | Flex Query ID (Trade Confirmation or Activity)                                                        |
+| `TARGET_WEBHOOK_URL`    | No       | —                  | Webhook endpoint (empty = log-only dry-run)                                                           |
+| `WEBHOOK_SECRET`        | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                  |
+| `NOTIFIERS`             | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run                                        |
+| `POLLER_ENABLED`        | No       | `true`             | Set to `false` to disable the poller container entirely                                               |
+| `REMOTE_CLIENT_ENABLED` | No       | `true`             | Set to `false` to disable ib-gateway, novnc, remote-client, and gateway-controller (poller-only mode) |
+| `POLL_INTERVAL_SECONDS` | No       | `600`              | Flex poll interval (seconds)                                                                          |
+| `TIME_ZONE`             | No       | `America/New_York` | Timezone (tz database format)                                                                         |
 
 ## Webhook Payload
 
@@ -488,8 +489,18 @@ After changing a variable in `.env`, restart only the affected service:
 | `API_TOKEN`                                                                                                                           | remote-client | `make sync S=relay`   |
 | `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, `WEBHOOK_HEADER_NAME/VALUE`, `POLL_INTERVAL_SECONDS` | poller        | `make sync S=poller`  |
 | `POLLER_ENABLED`                                                                                                                      | poller        | `make sync`           |
+| `REMOTE_CLIENT_ENABLED`                                                                                                               | gateway stack | `make sync`           |
 | `VNC_DOMAIN`, `SITE_DOMAIN`                                                                                                           | caddy         | `make sync S=caddy`   |
 | Multiple services or unsure                                                                                                           | all           | `make sync`           |
+
+**One-shot overrides** — toggle services for a single command without editing `.env`:
+
+```bash
+make sync POLLER=0           # disable poller
+make sync REMOTE_CLIENT=0    # disable gateway stack
+make sync REMOTE_CLIENT=1    # re-enable gateway stack
+make local-up POLLER=0       # start local stack without poller
+```
 
 ### Syncing code changes
 
@@ -849,6 +860,7 @@ make logs S=ib-gateway
 - [x] E2E test infrastructure (Docker-based, paper account)
 - [x] Real-time listener (opt-in, `LISTENER_ENABLED`)
 - [x] Optional poller disable (`POLLER_ENABLED=false`)
+- [x] Optional gateway stack disable (`REMOTE_CLIENT_ENABLED=false`, poller-only mode)
 - [ ] Health monitoring / alerting
 
 ## Flex XML Parsing

@@ -4,11 +4,13 @@ services:
   ib-gateway:
     image: ghcr.io/gnzsnz/ib-gateway:stable
     restart: on-failure
+    deploy:
+      replicas: ${GATEWAY_REPLICAS:-1}
     environment:
-      TWS_USERID: ${TWS_USERID:?Set TWS_USERID in .env}
-      TWS_PASSWORD: ${TWS_PASSWORD:?Set TWS_PASSWORD in .env}
+      TWS_USERID: ${TWS_USERID:-}
+      TWS_PASSWORD: ${TWS_PASSWORD:-}
       TRADING_MODE: ${TRADING_MODE:-paper}
-      VNC_SERVER_PASSWORD: ${VNC_SERVER_PASSWORD:?Set VNC_SERVER_PASSWORD in .env}
+      VNC_SERVER_PASSWORD: ${VNC_SERVER_PASSWORD:-}
       TWOFA_TIMEOUT_ACTION: exit
       RELOGIN_AFTER_TWOFA_TIMEOUT: "no"
       EXISTING_SESSION_DETECTED_ACTION: primary
@@ -23,6 +25,8 @@ services:
   novnc:
     image: theasp/novnc:latest
     restart: always
+    deploy:
+      replicas: ${GATEWAY_REPLICAS:-1}
     depends_on:
       - ib-gateway
     environment:
@@ -61,6 +65,8 @@ services:
       context: .
       dockerfile: services/remote-client/Dockerfile
     restart: always
+    deploy:
+      replicas: ${GATEWAY_REPLICAS:-1}
     depends_on:
       - ib-gateway
     environment:
@@ -127,6 +133,8 @@ services:
   gateway-controller:
     build: ./infra/gateway-controller
     restart: always
+    deploy:
+      replicas: ${GATEWAY_REPLICAS:-1}
     environment:
       COMPOSE_PROJECT_NAME: ibkr-relay
     volumes:

@@ -57,6 +57,28 @@ def _compose_env():
         poller_enabled = os.environ.get("POLLER_ENABLED", "true")
         if poller_enabled.lower() in ("false", "0", "no", ""):
             env_vars["POLLER_REPLICAS"] = "0"
+
+    # GATEWAY_REPLICAS from Makefile (make sync REMOTE_CLIENT=0) takes precedence
+    gw_replicas = os.environ.get("GATEWAY_REPLICAS")
+    if gw_replicas is not None:
+        if gw_replicas not in ("0", "1"):
+            die(f"GATEWAY_REPLICAS must be 0 or 1 (got: {gw_replicas})")
+        env_vars["GATEWAY_REPLICAS"] = gw_replicas
+    else:
+        rc_enabled = os.environ.get("REMOTE_CLIENT_ENABLED", "true")
+        if rc_enabled.lower() in ("false", "0", "no", ""):
+            env_vars["GATEWAY_REPLICAS"] = "0"
+
+    # Warn if listener is enabled but gateway stack is disabled
+    if env_vars.get("GATEWAY_REPLICAS") == "0":
+        listener = os.environ.get("LISTENER_ENABLED", "")
+        if listener and listener.lower() not in ("false", "0", "no"):
+            print(
+                "WARNING: LISTENER_ENABLED is set but REMOTE_CLIENT_ENABLED=false "
+                "— the listener requires the remote-client service",
+                file=sys.stderr,
+            )
+
     return env_vars
 
 
@@ -77,6 +99,14 @@ def _pre_sync_hook():
     from notifier import validate_notifier_env
     validate_notifier_env()
     validate_notifier_env("_2")
+    # Validate gateway env vars when gateway stack is enabled
+    # (replaces compose :? validation removed for poller-only deploys)
+    env_vars = _compose_env()
+    if env_vars.get("GATEWAY_REPLICAS") != "0":
+        missing = [v for v in ("TWS_USERID", "TWS_PASSWORD", "VNC_SERVER_PASSWORD")
+                   if not os.environ.get(v)]
+        if missing:
+            die(f"Gateway is enabled but missing: {', '.join(missing)}")
 
 
 _RELAY_URLS: dict[str, str] = {

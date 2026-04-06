@@ -15,6 +15,14 @@ ifdef POLLER
   export POLLER_REPLICAS := $(POLLER)
 endif
 
+# Allow disabling gateway stack: make local-up REMOTE_CLIENT=0  or  make sync REMOTE_CLIENT=0
+ifdef REMOTE_CLIENT
+  ifneq ($(filter $(REMOTE_CLIENT),0 1),$(REMOTE_CLIENT))
+    $(error REMOTE_CLIENT must be 0 or 1 (got: $(REMOTE_CLIENT)))
+  endif
+  export GATEWAY_REPLICAS := $(REMOTE_CLIENT)
+endif
+
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
 
