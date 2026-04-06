@@ -133,7 +133,7 @@ Two domain names are **required**. Caddy uses them to automatically provision TL
 | Environment Variable | Purpose                                                      | Example             |
 | -------------------- | ------------------------------------------------------------ | ------------------- |
 | `VNC_DOMAIN`         | Serves the noVNC interface for IB Gateway 2FA authentication | `vnc.example.com`   |
-| `TRADE_DOMAIN`       | Serves the order placement API (`/ibkr/order`, `/health`)    | `trade.example.com` |
+| `SITE_DOMAIN`        | Serves the order placement API (`/ibkr/order`, `/health`)    | `trade.example.com` |
 
 ### Setup
 
@@ -145,13 +145,13 @@ Two domain names are **required**. Caddy uses them to automatically provision TL
 2. Set both in `.env`:
    ```
    VNC_DOMAIN=vnc.example.com
-   TRADE_DOMAIN=trade.example.com
+   SITE_DOMAIN=trade.example.com
    ```
 3. Start the stack — Caddy will automatically obtain and renew certificates for both domains.
 
 > **Why two domains?** The VNC interface provides direct access to IB Gateway for 2FA and manual management. The trade API is a separate concern with its own authentication (Bearer token). Separating them on different domains provides clean isolation — you can restrict VNC access at the DNS/firewall level without affecting the trade API, and vice versa.
 
-> **Can I use just an IP address?** No. Let's Encrypt does not issue certificates for bare IP addresses. The Caddy reverse proxy requires valid domain names to provision TLS certificates. Both `VNC_DOMAIN` and `TRADE_DOMAIN` must be set or the stack will refuse to start.
+> **Can I use just an IP address?** No. Let's Encrypt does not issue certificates for bare IP addresses. The Caddy reverse proxy requires valid domain names to provision TLS certificates. Both `VNC_DOMAIN` and `SITE_DOMAIN` must be set or the stack will refuse to start.
 
 ## Memory & Droplet Sizing
 
@@ -307,7 +307,7 @@ For automated deployment without local Terraform:
 | `TWS_PASSWORD`          | IBKR password                                 |
 | `VNC_SERVER_PASSWORD`   | Password for browser VNC access               |
 | `VNC_DOMAIN`            | Domain for VNC access                         |
-| `TRADE_DOMAIN`          | Domain for trade API                          |
+| `SITE_DOMAIN`           | Domain for trade API                          |
 | `API_TOKEN`             | Bearer token for trade API                    |
 | `IBKR_FLEX_TOKEN`       | Flex Web Service token                        |
 | `IBKR_FLEX_QUERY_ID`    | Trade Confirmation query ID                   |
@@ -333,7 +333,7 @@ All configuration is via environment variables in `.env`:
 | `TRADING_MODE`          | No       | `paper`            | `paper` or `live`                                              |
 | `VNC_SERVER_PASSWORD`   | Yes      | —                  | Password for noVNC browser access                              |
 | `VNC_DOMAIN`            | Yes      | —                  | Domain for VNC access (see [Domains & HTTPS](#domains--https)) |
-| `TRADE_DOMAIN`          | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))  |
+| `SITE_DOMAIN`           | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))  |
 | `API_TOKEN`             | Yes      | —                  | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)  |
 | `IBKR_FLEX_TOKEN`       | Yes      | —                  | Flex Web Service token (from Client Portal)                    |
 | `IBKR_FLEX_QUERY_ID`    | Yes      | —                  | Flex Query ID (Trade Confirmation or Activity)                 |
@@ -483,7 +483,7 @@ After changing a variable in `.env`, restart only the affected service:
 | `TWS_USERID`, `TWS_PASSWORD`, `TRADING_MODE`, `JAVA_HEAP_SIZE`                                                                        | ib-gateway    | `make sync S=gateway` |
 | `API_TOKEN`                                                                                                                           | webhook-relay | `make sync S=relay`   |
 | `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, `WEBHOOK_HEADER_NAME/VALUE`, `POLL_INTERVAL_SECONDS` | poller        | `make sync S=poller`  |
-| `VNC_DOMAIN`, `TRADE_DOMAIN`                                                                                                          | caddy         | `make sync S=caddy`   |
+| `VNC_DOMAIN`, `SITE_DOMAIN`                                                                                                           | caddy         | `make sync S=caddy`   |
 | Multiple services or unsure                                                                                                           | all           | `make sync`           |
 
 ### Syncing code changes
@@ -676,7 +676,7 @@ make order Q=2 SYM=TSLA T=LMT P=300 TIF=GTC
 make order Q=2 SYM=TSLA T=LMT P=300 RTH=1
 ```
 
-Positive quantity = **BUY**, negative = **SELL**. The script calls `https://<TRADE_DOMAIN>/ibkr/order` over HTTPS with Bearer token authentication.
+Positive quantity = **BUY**, negative = **SELL**. The script calls `https://<SITE_DOMAIN>/ibkr/order` over HTTPS with Bearer token authentication.
 
 You can also call the API directly:
 
@@ -742,7 +742,7 @@ python3 -m cli poll --replay 3   # resend 3 trades
 You can also call the endpoint directly with `curl`:
 
 ```bash
-source .env && curl -s -X POST "https://${TRADE_DOMAIN}/ibkr/poller/run" \
+source .env && curl -s -X POST "https://${SITE_DOMAIN}/ibkr/poller/run" \
   -H "Authorization: Bearer ${API_TOKEN}" \
   | python3 -m json.tool
 ```

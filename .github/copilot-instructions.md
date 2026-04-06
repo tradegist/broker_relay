@@ -10,7 +10,7 @@
 
 - **No hardcoded credentials** — passwords, API tokens, secrets, and keys MUST come from environment variables (`.env` file or `TF_VAR_*`). Never write real values in source files.
 - **No hardcoded IPs** — use `DROPLET_IP` from `.env`. In documentation, use `1.2.3.4` as placeholder.
-- **No hardcoded domains** — use `example.com` variants (`vnc.example.com`, `trade.example.com`) in docs and code. Actual domains are loaded at runtime via `VNC_DOMAIN` / `TRADE_DOMAIN` env vars.
+- **No hardcoded domains** — use `example.com` variants (`vnc.example.com`, `trade.example.com`) in docs and code. Actual domains are loaded at runtime via `VNC_DOMAIN` / `SITE_DOMAIN` env vars.
 - **No email addresses or personal info** — never write real names, emails, or account IDs in committed files. Use `UXXXXXXX` for IBKR account examples.
 - **No logging of secrets or sensitive operational data** — never `log.info()` or `print()` tokens, passwords, or API keys. Log actions and outcomes, not credential values. When adding any `log.info()` or `log.debug()` call, check whether the logged value contains sensitive fields (e.g. `accountId`, `acctAlias`, account numbers, IPs, domains). Never log full model dumps at `info` level — use `log.debug` with explicit field exclusion: `log.debug("Trade: %s", trade.model_dump_json(exclude={"accountId", "acctAlias"}))`. Prefer logging counts, symbols, and statuses over full objects.
 - **`.env`, `*.tfvars`, and `.env.test` are gitignored** — never commit them. Use `.env.example` / `.env.test.example` with placeholder values as reference.
@@ -85,7 +85,7 @@ Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 | `gateway-controller` | Lightweight sidecar — starts ib-gateway container via Docker socket            |
 
 All secrets are injected via `.env` → `environment` in `docker-compose.yml`.
-Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses `{$VNC_DOMAIN}` / `{$TRADE_DOMAIN}` syntax.
+Caddy reads `VNC_DOMAIN` and `SITE_DOMAIN` from env vars — the Caddyfile uses `{$VNC_DOMAIN}` / `{$SITE_DOMAIN}` syntax.
 
 ### Caddy Snippet Structure
 
@@ -93,14 +93,21 @@ The Caddyfile uses `import` directives to compose routing from snippet files:
 
 ```
 infra/caddy/
-  Caddyfile              # Shell: imports from sites/ and domains/
+  Caddyfile              # Shell: imports from sites/, domains/, and shared dirs
   sites/
-    ibkr.caddy           # TRADE_DOMAIN route handlers (handle /ibkr/*)
+    ibkr.caddy           # SITE_DOMAIN route handlers (handle /ibkr/*)
   domains/
     ibkr-vnc.caddy       # VNC_DOMAIN site block (full site definition)
 ```
 
-- **`sites/*.caddy`** contain `handle` blocks imported inside the `{$TRADE_DOMAIN}` site definition. Each project writes one snippet (e.g. `ibkr.caddy`, `kraken.caddy`). Routes must be prefixed with the project name (`/ibkr/*`, `/kraken/*`) to avoid collisions.
+Shared projects deploy snippets to `/opt/caddy-shared/{sites,domains}/` on the droplet (not into the host project's directory). The host Caddy mounts both:
+- `./infra/caddy/sites/` → `/etc/caddy/sites/` (host project's own routes)
+- `/opt/caddy-shared/sites/` → `/etc/caddy/shared-sites/` (shared projects' routes)
+- Same pattern for `domains/` and `shared-domains/`.
+
+During shared deploy, snippet files are **templated** — all `{$VAR}` placeholders are replaced with literal env var values from the shared project's `.env`. This avoids requiring the host Caddy container to have the shared project's env vars.
+
+- **`sites/*.caddy`** contain `handle` blocks imported inside the `{$SITE_DOMAIN}` site definition. Each project writes one snippet (e.g. `ibkr.caddy`, `kraken.caddy`). Routes must be prefixed with the project name (`/ibkr/*`, `/kraken/*`) to avoid collisions.
 - **`domains/*.caddy`** contain full site definitions (e.g. `{$VNC_DOMAIN} { ... }`), imported at the top level.
 - This structure allows multiple projects to share a single Caddy instance on the same droplet.
 
@@ -378,7 +385,7 @@ services/               # Business-logic services (user-facing features)
     models_poller.py    # Pydantic models: Fill, Trade, WebhookPayload, BuySell
 infra/                  # Infrastructure backbone (no business logic)
   caddy/Caddyfile       # Reverse proxy config (uses env vars for domains)
-  caddy/sites/          # Route snippets imported inside {$TRADE_DOMAIN}
+  caddy/sites/          # Route snippets imported inside {$SITE_DOMAIN}
     ibkr.caddy          # /ibkr/* routes (poller, webhook-relay)
   caddy/domains/        # Full site blocks imported at top level
     ibkr-vnc.caddy      # {$VNC_DOMAIN} block (novnc + gateway-controller)

@@ -95,7 +95,7 @@ resource "digitalocean_droplet" "relay" {
       time_zone      = var.time_zone
       java_heap_size = var.java_heap_size
       vnc_domain     = var.vnc_domain
-      trade_domain   = var.trade_domain
+      site_domain    = var.site_domain
       api_token      = var.api_token
       flex_token_2   = var.flex_token_2
       flex_query_id_2 = var.flex_query_id_2

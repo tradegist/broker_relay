@@ -61,8 +61,8 @@ Add a `GET /health` handler returning:
 
 ### 1c. Update Caddyfile routing
 
-Add route so `GET {TRADE_DOMAIN}/health/poller` → `poller:8000/health`  
-Keep `GET {TRADE_DOMAIN}/health` → `webhook-relay:5000/health` (already works via default route)
+Add route so `GET {SITE_DOMAIN}/health/poller` → `poller:8000/health`  
+Keep `GET {SITE_DOMAIN}/health` → `webhook-relay:5000/health` (already works via default route)
 
 **File**: `caddy/Caddyfile`
 
@@ -174,8 +174,8 @@ This is independent of the above and provides an outside-in view. No code change
 
 ```makefile
 health:  ## Check health of all services
-	@echo "=== Relay ===" && curl -sf https://$$(grep TRADE_DOMAIN .env | cut -d= -f2)/health | python3 -m json.tool
-	@echo "\n=== Poller ===" && curl -sf https://$$(grep TRADE_DOMAIN .env | cut -d= -f2)/health/poller | python3 -m json.tool
+	@echo "=== Relay ===" && curl -sf https://$$(grep SITE_DOMAIN .env | cut -d= -f2)/health | python3 -m json.tool
+	@echo "\n=== Poller ===" && curl -sf https://$$(grep SITE_DOMAIN .env | cut -d= -f2)/health/poller | python3 -m json.tool
 ```
 
 **File**: `Makefile`

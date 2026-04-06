@@ -71,7 +71,7 @@ def relay_api(path, method="POST", data=None):
     if base_url:
         url = f"{base_url}{path}"
     else:
-        domain = env("TRADE_DOMAIN")
+        domain = env("SITE_DOMAIN")
         url = f"https://{domain}{path}"
     token = env("API_TOKEN")
     body = json.dumps(data).encode() if data else None

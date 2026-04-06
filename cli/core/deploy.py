@@ -1,6 +1,8 @@
 import os
+import re
 import shutil
 import stat
+import tempfile
 from pathlib import Path
 
 from cli.core import (
@@ -58,6 +60,56 @@ def _deploy_standalone():
     print()
 
 
+def _template_caddy_snippet(src: Path) -> str:
+    """Replace Caddy {$VAR} placeholders with env var values.
+
+    Finds all ``{$NAME}`` patterns in the file and substitutes them
+    with the corresponding environment variable. Raises if any
+    referenced env var is not set.
+    """
+    content = src.read_text()
+    refs = re.findall(r'\{\$([A-Z_][A-Z0-9_]*)\}', content)
+    if not refs:
+        return content
+    missing = [name for name in refs if not os.environ.get(name)]
+    if missing:
+        die(f"Caddy snippet {src.name} references undefined env vars: "
+            f"{', '.join(missing)}\nSet them in .env before deploying.")
+    for name in refs:
+        content = content.replace(f"{{${name}}}", os.environ[name])
+    return content
+
+
+def _deploy_caddy_snippets(droplet_ip: str) -> None:
+    """Copy project Caddy snippets to /opt/caddy-shared/ and reload Caddy."""
+    cfg = config()
+    caddy_dir = cfg.project_dir / "infra" / "caddy"
+    deployed = False
+
+    for subdir in ("sites", "domains"):
+        src_dir = caddy_dir / subdir
+        if not src_dir.is_dir():
+            continue
+        for snippet in src_dir.glob("*.caddy"):
+            templated = _template_caddy_snippet(snippet)
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".caddy", delete=False,
+            ) as tmp:
+                tmp.write(templated)
+                tmp_path = tmp.name
+            try:
+                scp_file(tmp_path, f"/opt/caddy-shared/{subdir}/{snippet.name}", droplet_ip)
+            finally:
+                os.unlink(tmp_path)
+            deployed = True
+            print(f"  Deployed snippet: {subdir}/{snippet.name}")
+
+    if deployed:
+        print("Reloading Caddy configuration...")
+        ssh_cmd(droplet_ip,
+                "docker exec caddy caddy reload --config /etc/caddy/Caddyfile")
+
+
 def _deploy_shared():
     """Deploy to an existing shared droplet (no Terraform)."""
     from cli.core.sync import _run_checks, _sync_local_files
@@ -77,6 +129,8 @@ def _deploy_shared():
             f"cd {cfg.remote_dir} && COMPOSE_PROFILES='{profiles}' "
             f"docker compose -f docker-compose.yml -f docker-compose.shared.yml "
             f"up -d --build --force-recreate")
+
+    _deploy_caddy_snippets(droplet_ip)
 
     print()
     print("=" * 44)

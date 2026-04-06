@@ -85,8 +85,8 @@ variable "vnc_domain" {
   type        = string
 }
 
-variable "trade_domain" {
-  description = "Domain for HTTPS trade API (must have DNS A record pointing to droplet)"
+variable "site_domain" {
+  description = "Domain for HTTPS API (must have DNS A record pointing to droplet)"
   type        = string
 }
 

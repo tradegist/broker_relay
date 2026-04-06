@@ -15,6 +15,9 @@ systemctl start docker
 # Clone the project repo
 git clone https://github.com/OWNER/ibkr_relay.git /opt/ibkr-relay
 
+# Create shared Caddy snippet directories (for shared-mode projects)
+mkdir -p /opt/caddy-shared/sites /opt/caddy-shared/domains
+
 # Directory is ready — Terraform provisioners will:
 # 1. Transfer .env with secrets
 # 2. Run docker compose up -d

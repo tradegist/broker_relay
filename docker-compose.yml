@@ -46,11 +46,13 @@ services:
       - "443:443"
     environment:
       VNC_DOMAIN: ${VNC_DOMAIN:?Set VNC_DOMAIN in .env}
-      TRADE_DOMAIN: ${TRADE_DOMAIN:?Set TRADE_DOMAIN in .env}
+      SITE_DOMAIN: ${SITE_DOMAIN:?Set SITE_DOMAIN in .env}
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./infra/caddy/sites/:/etc/caddy/sites/:ro
       - ./infra/caddy/domains/:/etc/caddy/domains/:ro
+      - /opt/caddy-shared/sites/:/etc/caddy/shared-sites/:ro
+      - /opt/caddy-shared/domains/:/etc/caddy/shared-domains/:ro
       - caddy-data:/data
       - caddy-config:/config
 
