@@ -39,7 +39,6 @@ But even with those libraries, you still need to **build a Python app, deploy it
 - [Security](#security)
 - [Testing](#testing)
 - [TypeScript Types](#typescript-types)
-- [GitHub Actions](#github-actions-fork--deploy)
 - [Project Structure](#project-structure)
 - [Current Status](#current-status)
 - [Flex XML Parsing](#flex-xml-parsing)
@@ -305,35 +304,6 @@ const order: IbkrHttp.PlaceOrderPayload = ...;
 
 Types are auto-generated from the Pydantic models via `make types`. The package is not yet published to npm — the API is still evolving.
 
-## GitHub Actions (Fork & Deploy)
-
-For automated deployment without local Terraform:
-
-1. Fork this repo
-2. Create a [DO Spaces](https://cloud.digitalocean.com/spaces) bucket for Terraform state
-3. Add these **GitHub Secrets**:
-
-| Secret                  | Description                                   |
-| ----------------------- | --------------------------------------------- |
-| `DO_API_TOKEN`          | DigitalOcean API token                        |
-| `TWS_USERID`            | IBKR username                                 |
-| `TWS_PASSWORD`          | IBKR password                                 |
-| `VNC_SERVER_PASSWORD`   | Password for browser VNC access               |
-| `VNC_DOMAIN`            | Domain for VNC access                         |
-| `SITE_DOMAIN`           | Domain for trade API                          |
-| `API_TOKEN`             | Bearer token for trade API                    |
-| `IBKR_FLEX_TOKEN`       | Flex Web Service token                        |
-| `IBKR_FLEX_QUERY_ID`    | Trade Confirmation query ID                   |
-| `TARGET_WEBHOOK_URL`    | Webhook destination (leave empty for dry-run) |
-| `WEBHOOK_SECRET`        | HMAC-SHA256 signing key                       |
-| `TRADING_MODE`          | `paper` or `live`                             |
-| `POLL_INTERVAL_SECONDS` | Poll frequency (default: 600)                 |
-| `TIME_ZONE`             | e.g. `America/New_York`                       |
-| `SPACES_ACCESS_KEY`     | DO Spaces access key (for TF state)           |
-| `SPACES_SECRET_KEY`     | DO Spaces secret key (for TF state)           |
-
-4. Go to **Actions** → **Deploy IBKR Relay** → **Run workflow** → select `deploy`
-
 ## Configuration
 
 All configuration is via environment variables in `.env`:
@@ -582,7 +552,7 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │   └── sync.py # rsync files + pre-deploy checks + restart containers
 ├── .env.example # Configuration template
 ├── .github/workflows/
-│ └── ci.yml # GitHub Actions: lint → typecheck → test
+│   └── ci.yml                     # GitHub Actions: lint → typecheck → test
 ├── terraform/
 │ ├── main.tf # Droplet, firewall, reserved IP, SSH key
 │ ├── variables.tf # Terraform variables (infrastructure only)
@@ -875,7 +845,6 @@ make logs S=ib-gateway
 - [x] Flex poller with SQLite dedup + webhook delivery
 - [x] On-demand poll endpoint (`make poll` / HTTP API)
 - [x] Local deploy/destroy/pause/resume scripts
-- [x] GitHub Actions workflow
 - [x] Dry-run mode (log payloads when no webhook URL)
 - [x] Webhook endpoint (HMAC-SHA256 signed, batched payloads)
 - [x] Pluggable notification backends (`services/notifier/`, currently: webhook)
