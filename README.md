@@ -185,6 +185,7 @@ JAVA_HEAP_SIZE=4096
 
 ### Prerequisites
 
+- [Docker Compose v2](https://docs.docker.com/compose/install/) (the Go rewrite, `docker compose` — not the legacy Python `docker-compose`). Required for `deploy.replicas` support, which is how `POLLER_ENABLED` and `REMOTE_CLIENT_ENABLED` disable services.
 - [Terraform](https://developer.hashicorp.com/terraform/install) installed
 - A [DigitalOcean API token](https://cloud.digitalocean.com/account/api/tokens)
 - An IBKR account (paper or live)

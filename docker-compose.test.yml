@@ -17,6 +17,8 @@ services:
       PYTHONPATH: /opt:/opt/poller-models
     ports:
       - "15010:5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./services/remote-client:/app
       - ./services/notifier:/opt/notifier

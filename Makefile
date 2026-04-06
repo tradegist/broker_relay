@@ -7,6 +7,9 @@ E2E_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.test.yml -p
 LOCAL_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.local.yml
 CLI_RELAY_ENV = $(if $(ENV),RELAY_ENV=$(ENV))
 
+# Service toggle via deploy.replicas (requires Docker Compose v2, the Go rewrite).
+# Compose v2 honours deploy.replicas WITHOUT Swarm — setting replicas to 0 prevents
+# the container from being created. See: https://docs.docker.com/reference/compose-file/deploy/
 # Allow disabling poller: make local-up POLLER=0  or  make sync POLLER=0
 ifdef POLLER
   ifneq ($(filter $(POLLER),0 1),$(POLLER))

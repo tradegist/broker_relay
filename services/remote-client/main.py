@@ -32,7 +32,8 @@ async def amain() -> None:
     client.ib.disconnectedEvent += client.on_disconnect
 
     # Start listener if enabled
-    if os.environ.get("LISTENER_ENABLED"):
+    listener_flag = os.environ.get("LISTENER_ENABLED", "").lower()
+    if listener_flag and listener_flag not in ("0", "false", "no"):
         from client.listener import ListenerNamespace
         from notifier import load_notifiers
 
