@@ -82,6 +82,8 @@
 ## Docker
 
 - **Never use `env_file:` in service definitions.** Always declare each env var explicitly in the `environment:` block with `${VAR}` interpolation. This is critical because `env_file:` is internally a list — override files append rather than replace, causing the production `.env` to leak into test containers. Explicit `environment:` vars with `--env-file` interpolation keeps environments fully isolated and allows clean overrides.
+- **`POLLER_ENABLED=false`** disables the poller container entirely. Implemented via `deploy.replicas: ${POLLER_REPLICAS:-1}` in `docker-compose.yml`. The mapping from `POLLER_ENABLED` to `POLLER_REPLICAS` happens in `cli/__init__.py` (`_compose_env()`) and the Makefile (`POLLER` flag). The derived `POLLER_REPLICAS` is injected as a shell env var in the SSH command (not in `.env`), so it takes precedence over the compose file default.
+- **`REMOTE_CLIENT_ENABLED=false`** disables the entire gateway stack: `ib-gateway`, `novnc`, `remote-client`, and `gateway-controller`. Same mechanism as poller: `deploy.replicas: ${GATEWAY_REPLICAS:-1}` on all four services, mapped from `REMOTE_CLIENT_ENABLED` via `_compose_env()` and the Makefile `REMOTE_CLIENT` flag. Gateway-specific required env vars (`TWS_USERID`, `TWS_PASSWORD`, `VNC_SERVER_PASSWORD`) use `:-` defaults in compose and are validated by the CLI when the gateway is enabled.
 - **`.dockerignore` uses an allowlist** (`*` to exclude everything, then `!services/poller/**` to include the whole module). Tests, `__pycache__`, and the Dockerfile itself are re-excluded. This means adding new source files to `services/poller/` requires **no** `.dockerignore` or Dockerfile changes.
 - **When adding a new standalone module** (e.g. `services/notifier/`), you must add a `!services/<module>/**` entry to `.dockerignore` — the allowlist excludes everything by default. Also add exclusions for test files and `__pycache__` under the new module. Without this, `COPY services/<module>/ ./<module>/` in the Dockerfile will fail with a cryptic "not found" error.
 - The poller Dockerfile uses directory COPYs (`COPY services/poller/poller/ ./poller/`, `COPY services/poller/routes/ ./routes/`) so new files are picked up automatically.
@@ -96,8 +98,8 @@ Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 | `ib-gateway`         | IBKR Gateway (gnzsnz/ib-gateway). Restart policy: `on-failure` (not `always`). |
 | `novnc`              | Browser VNC proxy for 2FA authentication                                       |
 | `caddy`              | Reverse proxy with automatic HTTPS (Let's Encrypt)                             |
-| `webhook-relay`      | Python API server — places orders via IB Gateway                               |
-| `poller`             | Polls IBKR Flex for trade confirmations, fires webhooks                        |
+| `remote-client`     | Python API server — places orders via IB Gateway, optional real-time listener. Disabled (with entire gateway stack) via `REMOTE_CLIENT_ENABLED=false` |
+| `poller`             | Polls IBKR Flex for trade confirmations, fires webhooks. Disabled via `POLLER_ENABLED=false` |
 | `gateway-controller` | Lightweight sidecar — starts ib-gateway container via Docker socket            |
 
 All secrets are injected via `.env` → `environment` in `docker-compose.yml`.
@@ -150,7 +152,9 @@ The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validate
 
 - `JAVA_HEAP_SIZE` in `.env` controls IB Gateway's JVM heap (in MB, default 768, max 10240).
 - **Droplet size is auto-selected** by Terraform based on this value (see `locals` block in `main.tf`).
-- `cli/resume.py` mirrors the same size-selection logic in Python.
+- **`DROPLET_SIZE`** overrides the heap-based auto-selection with a direct DO slug (e.g. `s-1vcpu-512mb`). Useful for poller-only deployments that don't need IB Gateway memory.
+- `cli/__init__.py` `_droplet_size()` checks `DROPLET_SIZE` first, then falls back to `JAVA_HEAP_SIZE`-based calculation.
+- `cli/core/resume.py` uses `cfg.droplet_size()` which delegates to the same `_droplet_size()` function.
 
 ## Auth Pattern
 
@@ -169,10 +173,10 @@ The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validate
 
 - **E2E tests run against a local Docker stack** with a real IB Gateway connected to a paper trading account. Real orders are placed in paper mode.
 - **Credentials live in `.env.test`** (gitignored). Template: `.env.test.example`.
-- **`docker-compose.test.yml`** at project root defines the test stack (ib-gateway + webhook-relay only, no Caddy/poller/VNC).
+- **`docker-compose.test.yml`** at project root defines the test stack (ib-gateway + remote-client only, no Caddy/poller/VNC).
 - **`make e2e`** starts the stack, waits for connection, runs pytest, then tears down. Always cleans up, even on test failure.
 - **`make e2e-up` / `make e2e-down`** for manual stack management during debugging.
-- **`make e2e-run`** restarts `webhook-relay` and `poller` containers (to pick up code changes from volume mounts), then runs the E2E tests. Safe to call repeatedly during development — no need to rebuild or restart manually.
+- **`make e2e-run`** restarts `remote-client` and `poller` containers (to pick up code changes from volume mounts), then runs the E2E tests. Safe to call repeatedly during development — no need to rebuild or restart manually.
 - **Test API runs on `localhost:15010`** with hardcoded token `test-token`.
 - **No healthcheck on `ib-gateway`** — the `IBClient.connect()` handles retry with exponential backoff, same as production.
 - **Paper accounts require no 2FA**, so the E2E stack is fully automated.
@@ -205,6 +209,8 @@ services/remote-client/
     test_orders.py         # Tests for orders namespace
     trades.py              # TradesNamespace: list()
     test_trades.py         # Tests for trades namespace
+    listener.py            # ListenerNamespace: subscribe to trade events → webhooks
+    test_listener.py       # Tests for listener namespace
   routes/                  # HTTP route handlers
     __init__.py            # Orchestrator: create_routes()
     middlewares.py         # Auth middleware (Bearer token)
@@ -217,6 +223,8 @@ services/remote-client/
     conftest.py            # httpx fixtures (api + anon_api)
     test_smoke.py          # Health + auth smoke tests
     test_trades.py         # Order placement + trade listing
+    test_listener.py       # Listener webhook E2E (skips when market closed)
+    test_remote_client_enabled.py  # Tests REMOTE_CLIENT_ENABLED toggle
     .env.test.example      # Template for paper credentials
 ```
 
@@ -241,6 +249,10 @@ services/poller/
     __init__.py            # Orchestrator: create_routes(), start_api_server()
     middlewares.py         # Auth middleware (Bearer token)
     run.py                 # POST /ibkr/poller/run handler
+  tests/e2e/               # E2E tests
+    conftest.py
+    test_smoke.py
+    test_poller_enabled.py   # Tests POLLER_ENABLED toggle
   Dockerfile
   requirements.txt
 ```
@@ -267,6 +279,21 @@ services/notifier/
 - **`validate_notifier_env()`** is called by `cli/__init__.py` during pre-deploy checks to ensure all required env vars are set for the configured backends.
 - **Adding a new backend** — create `services/notifier/<name>.py` with a class extending `BaseNotifier`, add it to `REGISTRY` in `__init__.py`.
 - **The poller calls `notify(notifiers, payload)`** — notifiers are loaded once at startup and passed through to `poll_once()`. The poller has no direct knowledge of webhook delivery mechanics.
+
+## Listener (Real-Time Trade Events)
+
+The listener is an **opt-in** feature (`LISTENER_ENABLED` env var) that subscribes to ib_async trade events and fires webhooks immediately when orders fill.
+
+- **Lives in `client/listener.py`** inside the remote-client service — it is a `ListenerNamespace`, same pattern as `OrdersNamespace`.
+- **Subscribes to two events**: `execDetailsEvent` (fill without commission) and `commissionReportEvent` (fill with commission). Both fire per fill → two webhooks per fill.
+- **Event subscriptions survive reconnects** — ib_async creates events in `__init__`, not in `connectAsync()`.
+- **Maps ib_async objects to the poller's `Trade` model** via `_map_to_trade()`. Since events provide different fields than Flex XML, some Trade fields are empty/zero (e.g. `tradeDate`, `tradeMoney`, `proceeds`). Key fields (`symbol`, `buySell`, `quantity`, `price`, `orderId`, `ibExecId`, `commission`, `dateTime`) are always populated.
+- **The `source` field** on `Trade` distinguishes origin: `"flex"`, `"execDetailsEvent"`, or `"commissionReportEvent"`.
+- **No cross-service dedup** — the listener and poller fire independently. Consumers use `source` or `ibExecId` to deduplicate.
+- **No buffering** — each event fires a webhook immediately.
+- **Async dispatch** — `asyncio.ensure_future(asyncio.to_thread(notify, ...))` fire-and-forget. The `notify()` function uses synchronous `httpx.post`, so it runs in a thread to avoid blocking the ib_async event loop.
+- **Side mapping**: `"BOT"` → `BuySell.BUY`, `"SLD"` → `BuySell.SELL`.
+- **UNSET sentinel**: ib_async uses `1.7976931348623157e308` for unset floats — the listener treats this as `0.0`.
 
 ## Models (Two Separate Files)
 
@@ -353,7 +380,7 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
 
 ## Code Style
 
-- Python: `logging` module, f-strings, `aiohttp` for async HTTP in both webhook-relay and poller, `httpx` for sync HTTP client in poller.
+- Python: `logging` module, f-strings, `aiohttp` for async HTTP in both remote-client and poller, `httpx` for sync HTTP client in poller.
 - CLI scripts: Python (`cli/` package), invoked via `python3 -m cli <command>` or `make`. Uses only stdlib (`subprocess`, `urllib.request`, `json`, `os`). No third-party dependencies. Uses lazy dispatch (`importlib.import_module`) — each command only imports its own module.
 - Terraform: all secrets marked `sensitive = true` in `variables.tf`.
 
@@ -405,6 +432,7 @@ python3 -m cli poll 2
 .env.example            # Template — copy to .env and fill in real values
 docker-compose.yml      # All 6 services
 docker-compose.shared.yml # Shared-mode overlay (disables Caddy, uses relay-net)
+docker-compose.local.yml  # Local dev override (direct port access, no TLS)
 cli/                    # Python CLI (operator scripts)
   __init__.py           # Shared helpers (env loading, SSH, DO API, validation)
   __main__.py           # Entry point (lazy dispatch via importlib)
@@ -416,14 +444,14 @@ cli/                    # Python CLI (operator scripts)
   order.py              # Place orders via HTTPS API
   poll.py               # Trigger immediate Flex poll
 services/               # Business-logic services (user-facing features)
-  remote-client/        # webhook-relay service (see Remote Client Structure above)
+  remote-client/        # remote-client service (see Remote Client Structure above)
   poller/               # Flex poller service (see Poller Structure above)
-    models_poller.py    # Pydantic models: Fill, Trade, WebhookPayload, BuySell
+    models_poller.py    # Pydantic models: Fill, Trade, WebhookPayload, BuySell, Source
   notifier/             # Pluggable notification backends (library, no container)
 infra/                  # Infrastructure backbone (no business logic)
   caddy/Caddyfile       # Reverse proxy config (uses env vars for domains)
   caddy/sites/          # Route snippets imported inside {$SITE_DOMAIN}
-    ibkr.caddy          # /ibkr/* routes (poller, webhook-relay)
+    ibkr.caddy          # /ibkr/* routes (poller, remote-client)
   caddy/domains/        # Full site blocks imported at top level
     ibkr-vnc.caddy      # {$VNC_DOMAIN} block (novnc + gateway-controller)
   gateway-controller/   # CGI sidecar (Alpine, busybox httpd)

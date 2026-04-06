@@ -6,14 +6,23 @@ services:
   ib-gateway:
     restart: "no"
 
-  webhook-relay:
+  remote-client:
     restart: "no"
     environment:
       API_TOKEN: test-token
+      LISTENER_ENABLED: "true"
+      NOTIFIERS: webhook
+      TARGET_WEBHOOK_URL: http://host.docker.internal:19999/webhook
+      WEBHOOK_SECRET: test-webhook-secret
+      PYTHONPATH: /opt:/opt/poller-models
     ports:
       - "15010:5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./services/remote-client:/app
+      - ./services/notifier:/opt/notifier
+      - ./services/poller/models_poller.py:/opt/poller-models/models_poller.py:ro
     healthcheck:
       test:
         [

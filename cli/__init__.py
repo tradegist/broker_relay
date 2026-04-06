@@ -44,7 +44,48 @@ def _compose_profiles():
     return ",".join(profiles)
 
 
+def _compose_env():
+    """Compute derived env vars for docker compose commands."""
+    env_vars: dict[str, str] = {}
+    # POLLER_REPLICAS from Makefile (make sync POLLER=0) takes precedence
+    replicas = os.environ.get("POLLER_REPLICAS")
+    if replicas is not None:
+        if replicas not in ("0", "1"):
+            die(f"POLLER_REPLICAS must be 0 or 1 (got: {replicas})")
+        env_vars["POLLER_REPLICAS"] = replicas
+    else:
+        poller_enabled = os.environ.get("POLLER_ENABLED", "true")
+        if poller_enabled.lower() in ("false", "0", "no", ""):
+            env_vars["POLLER_REPLICAS"] = "0"
+
+    # GATEWAY_REPLICAS from Makefile (make sync REMOTE_CLIENT=0) takes precedence
+    gw_replicas = os.environ.get("GATEWAY_REPLICAS")
+    if gw_replicas is not None:
+        if gw_replicas not in ("0", "1"):
+            die(f"GATEWAY_REPLICAS must be 0 or 1 (got: {gw_replicas})")
+        env_vars["GATEWAY_REPLICAS"] = gw_replicas
+    else:
+        rc_enabled = os.environ.get("REMOTE_CLIENT_ENABLED", "true")
+        if rc_enabled.lower() in ("false", "0", "no", ""):
+            env_vars["GATEWAY_REPLICAS"] = "0"
+
+    # Warn if listener is enabled but gateway stack is disabled
+    if env_vars.get("GATEWAY_REPLICAS") == "0":
+        listener = os.environ.get("LISTENER_ENABLED", "")
+        if listener and listener.lower() not in ("false", "0", "no"):
+            print(
+                "WARNING: LISTENER_ENABLED is set but REMOTE_CLIENT_ENABLED=false "
+                "— the listener requires the remote-client service",
+                file=sys.stderr,
+            )
+
+    return env_vars
+
+
 def _droplet_size():
+    override = os.environ.get("DROPLET_SIZE", "")
+    if override:
+        return override
     heap = int(env("JAVA_HEAP_SIZE", "768"))
     if heap <= 1024:
         return "s-1vcpu-2gb"
@@ -61,6 +102,14 @@ def _pre_sync_hook():
     from notifier import validate_notifier_env
     validate_notifier_env()
     validate_notifier_env("_2")
+    # Validate gateway env vars when gateway stack is enabled
+    # (replaces compose :? validation removed for poller-only deploys)
+    env_vars = _compose_env()
+    if env_vars.get("GATEWAY_REPLICAS") != "0":
+        missing = [v for v in ("TWS_USERID", "TWS_PASSWORD", "VNC_SERVER_PASSWORD")
+                   if not os.environ.get(v)]
+        if missing:
+            die(f"Gateway is enabled but missing: {', '.join(missing)}")
 
 
 _RELAY_URLS: dict[str, str] = {
@@ -101,6 +150,7 @@ _CONFIG = CoreConfig(
     terraform_vars={
         "do_token": "DO_API_TOKEN",
         "java_heap_size": "JAVA_HEAP_SIZE",
+        "droplet_size": "DROPLET_SIZE",
         "vnc_domain": "VNC_DOMAIN",
         "site_domain": "SITE_DOMAIN",
     },
@@ -115,8 +165,8 @@ _CONFIG = CoreConfig(
         "novnc": "novnc",
         "vnc": "novnc",
         "caddy": "caddy",
-        "relay": "webhook-relay",
-        "webhook-relay": "webhook-relay",
+        "relay": "remote-client",
+        "remote-client": "remote-client",
         "poller": "poller",
         "poller2": "poller-2",
         "poller-2": "poller-2",
@@ -124,6 +174,7 @@ _CONFIG = CoreConfig(
     post_deploy_message="Open the VNC URL and complete 2FA",
     post_resume_message="Open https://{VNC_DOMAIN} to complete 2FA",
     compose_profiles_fn=_compose_profiles,
+    compose_env_fn=_compose_env,
     size_selector_fn=_droplet_size,
     route_prefix="/ibkr",
     pre_sync_hook=_pre_sync_hook,

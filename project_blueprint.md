@@ -879,6 +879,7 @@ class CoreConfig:
     post_deploy_message: str = ""                   # Printed after standalone deploy
     post_resume_message: str = ""                   # Printed after resume
     compose_profiles_fn: Callable[[], str] | None = None  # Returns COMPOSE_PROFILES
+    compose_env_fn: Callable[[], dict[str, str]] | None = None  # Returns extra env vars for compose
     size_selector_fn: Callable[[], str] | None = None     # Returns droplet size slug
     route_prefix: str = ""                           # Caddy site snippet route prefix (e.g. '/kraken')
     pre_sync_hook: Callable[[], None] | None = None       # Runs before sync
@@ -888,7 +889,8 @@ class CoreConfig:
         return f"/opt/{self.project_name}"
 
     def compose_profiles(self) -> str: ...
-    def droplet_size(self) -> str: ...  # Falls back to "s-1vcpu-1gb"
+    def compose_env(self) -> str: ...    # Calls compose_env_fn, returns shell assignments
+    def droplet_size(self) -> str: ...   # Falls back to "s-1vcpu-1gb"
 ```
 
 Generic helpers exported: `die()`, `load_env()`, `env()`, `require_env()`,
