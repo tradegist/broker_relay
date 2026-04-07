@@ -380,7 +380,7 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
 
 ## TypeScript Types
 
-- Types are published as `@tradegist/ibkr-types` (npm package in `types/`, not yet published).
+- Types are published as `@tradegist/ibkr-relay-types` (npm package in `types/`, not yet published).
 - **Two namespaces**: `IbkrPoller` (webhook payload types) and `IbkrHttp` (order API types).
 - **`make types`** regenerates both from Pydantic models:
   - `services/poller/models_poller.py` → `types/poller/webhook.d.ts`
@@ -389,7 +389,7 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
   ```
   types/
     index.d.ts                 # Barrel: exports IbkrPoller, IbkrHttp namespaces
-    package.json               # @tradegist/ibkr-types
+    package.json               # @tradegist/ibkr-relay-types
     poller/
       index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
       types.d.ts               # Generated from poller/models_poller.py
@@ -399,7 +399,7 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
       types.d.ts               # Generated from remote-client/models_remote_client.py
       types.schema.json         # Intermediate JSON Schema
   ```
-- **Usage:** `import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-types"`
+- **Usage:** `import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-relay-types"`
 - Each model file declares a `SCHEMA_MODELS` list at the bottom — `schema_gen.py` reads it to generate the JSON Schema. **To export a new model to TypeScript, append it to `SCHEMA_MODELS` in the relevant `models_*.py` file and update the corresponding `types/*/index.d.ts` re-exports.**
 
 ## Code Style
@@ -481,7 +481,7 @@ infra/                  # Infrastructure backbone (no business logic)
     ibkr-vnc.caddy      # {$VNC_DOMAIN} block (novnc + gateway-controller)
   gateway-controller/   # CGI sidecar (Alpine, busybox httpd)
   novnc/index.html      # Custom VNC UI (Tailwind CSS)
-types/                  # @tradegist/ibkr-types npm package (IbkrPoller + IbkrHttp namespaces)
+types/                  # @tradegist/ibkr-relay-types npm package (IbkrPoller + IbkrHttp namespaces)
 docker-compose.test.yml # E2E test stack
 terraform/              # Infrastructure as code (DigitalOcean)
 ```

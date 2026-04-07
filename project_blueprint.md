@@ -309,7 +309,7 @@ kraken_relay/
 │       ├── sites/
 │       │   └── kraken.caddy     # SITE_DOMAIN route handlers (handle /kraken/*)
 │       └── domains/             # Full site blocks (if project needs own domain)
-├── types/                       # @tradegist/kraken-types npm package
+├── types/                       # @tradegist/kraken-relay-types npm package
 │   ├── package.json
 │   ├── index.d.ts
 │   ├── listener/
@@ -593,6 +593,31 @@ class WebhookPayload(BaseModel):
 
 SCHEMA_MODELS: list[type[BaseModel]] = [WebhookPayload, Trade, Fill]
 ```
+
+### Field Normalization
+
+Kraken's WS v2 and REST APIs use different field names for the same data. The
+parsers normalize both into a unified `Fill` model. This table is the source of
+truth for the mapping — document it in the README for webhook consumers.
+
+| Fill field  | Kraken WS v2 raw    | Kraken REST raw          | Notes                                      |
+| ----------- | ------------------- | ------------------------ | ------------------------------------------ |
+| `execId`    | `exec_id`           | dict key (`txid`)        | Renamed from both sources                  |
+| `orderId`   | `order_id`          | `ordertxid`              | Renamed from both sources                  |
+| `symbol`    | `symbol`            | `pair`                   | REST rename only                           |
+| `side`      | `side`              | `type`                   | REST rename only                           |
+| `orderType` | `order_type`        | `ordertype`              | Renamed from both sources                  |
+| `price`     | `last_price`        | `price`                  | WS rename only                             |
+| `volume`    | `last_qty`          | `vol`                    | Renamed from both sources                  |
+| `cost`      | `cost`              | `cost`                   | No rename                                  |
+| `fee`       | `fees[].qty` (sum)  | `fee`                    | WS: array of `{asset, qty}` summed to float |
+| `timestamp` | `timestamp`         | `time` (unix float)      | REST: converted to ISO 8601 string         |
+| `source`    | `"ws_execution"`    | `"rest_poll"`            | Hardcoded per source                       |
+
+> **Why rename?** Kraken's WS v2 and REST APIs are internally inconsistent
+> (`exec_id` vs `txid`, `last_qty` vs `vol`, `pair` vs `symbol`). The parsers
+> normalize both into a single `Fill` model so webhook consumers see one
+> consistent schema regardless of which data source detected the fill.
 
 ### `services/poller/models_poller.py`
 
