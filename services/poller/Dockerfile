@@ -9,5 +9,6 @@ COPY services/poller/models_poller.py services/poller/main.py ./
 COPY services/poller/poller/ ./poller/
 COPY services/poller/routes/ ./routes/
 COPY services/notifier/ ./notifier/
+COPY services/dedup/ ./dedup/
 
 CMD ["python", "-u", "main.py"]

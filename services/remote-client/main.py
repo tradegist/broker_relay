@@ -6,10 +6,14 @@ Starts the IB Gateway connection and HTTP API server.
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 from aiohttp import web
+from dedup import init_db
 
 from client import IBClient
+from client.listener import ListenerNamespace
+from notifier import load_notifiers
 from routes import create_routes
 
 logging.basicConfig(
@@ -20,6 +24,8 @@ logging.basicConfig(
 log = logging.getLogger("remote-client")
 
 API_PORT = int(os.environ.get("API_PORT", "5000"))
+DEDUP_DB_PATH = os.environ.get("DEDUP_DB_PATH", "/data/dedup/fills.db")
+DEBOUNCE_MS = int(os.environ.get("LISTENER_EVENT_DEBOUNCE_TIME", "0"))
 
 
 async def amain() -> None:
@@ -34,11 +40,12 @@ async def amain() -> None:
     # Start listener if enabled
     listener_flag = os.environ.get("LISTENER_ENABLED", "").lower()
     if listener_flag and listener_flag not in ("0", "false", "no"):
-        from client.listener import ListenerNamespace
-        from notifier import load_notifiers
-
+        db_path = Path(DEDUP_DB_PATH)
+        db = init_db(db_path)
         notifiers = load_notifiers()
-        client.listener = ListenerNamespace(client.ib, notifiers)
+        client.listener = ListenerNamespace(
+            client.ib, notifiers, db, debounce_ms=DEBOUNCE_MS,
+        )
         client.listener.start()
         log.info("Listener enabled — subscribed to trade events")
 

@@ -155,3 +155,74 @@ def test_commission_report_has_commission(
     for entry in commission_entries:
         trade = entry["body"]["trades"][0]
         assert trade["commission"] > 0, f"Expected commission > 0, got {trade['commission']}"
+
+
+def test_debounce_path_fires_webhook(
+    api: httpx.Client, webhook_payloads: list[dict[str, Any]],
+) -> None:
+    """With LISTENER_EVENT_DEBOUNCE_TIME=2000, commissionReportEvent goes through
+    the debounce path: enqueue → timer → flush → aggregate → webhook.
+
+    Verify the webhook arrives after at least ~2s (the debounce window) and
+    contains the expected aggregated fields (execIds, fillCount).
+    """
+    baseline = len(webhook_payloads)
+
+    resp = api.post(
+        "/ibkr/order",
+        json={
+            "contract": {"symbol": "AAPL"},
+            "order": {"action": "BUY", "totalQuantity": 1, "orderType": "MKT"},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    order_id = resp.json()["orderId"]
+    filled = _wait_for_fill(api, order_id, timeout=10)
+    if not filled:
+        pytest.skip("Market appears closed — order did not fill")
+
+    # execDetailsEvent arrives immediately (no debounce)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        exec_events = [
+            e for e in webhook_payloads[baseline:]
+            if e["body"]["trades"][0]["source"] == "execDetailsEvent"
+        ]
+        if exec_events:
+            break
+        time.sleep(0.3)
+    assert exec_events, "execDetailsEvent webhook never arrived"
+
+    # commissionReportEvent should arrive after debounce (~2s window)
+    t0 = time.monotonic()
+    deadline = time.monotonic() + 10
+    commission_event = None
+    while time.monotonic() < deadline:
+        for e in webhook_payloads[baseline:]:
+            if e["body"]["trades"][0]["source"] == "commissionReportEvent":
+                commission_event = e
+                break
+        if commission_event:
+            break
+        time.sleep(0.3)
+
+    assert commission_event is not None, "commissionReportEvent webhook never arrived"
+    elapsed = time.monotonic() - t0
+
+    # The debounce path produces aggregated fields
+    trade = commission_event["body"]["trades"][0]
+    assert "execIds" in trade, "Debounced webhook missing execIds"
+    assert isinstance(trade["execIds"], list)
+    assert len(trade["execIds"]) >= 1
+    assert "fillCount" in trade
+    assert trade["fillCount"] >= 1
+    assert trade["symbol"] == "AAPL"
+    assert trade["buySell"] == "BUY"
+
+    # Sanity: webhook should have arrived after at least ~1.5s (debounce=2s minus margin)
+    # This confirms the debounce path ran, not the immediate path.
+    assert elapsed >= 1.0, (
+        f"commissionReportEvent arrived too fast ({elapsed:.1f}s), "
+        "debounce path may not have been used"
+    )

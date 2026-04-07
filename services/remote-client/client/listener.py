@@ -1,14 +1,28 @@
-"""Listener namespace — subscribe to ib_async trade events and fire webhooks."""
+"""Listener namespace — subscribe to ib_async trade events and fire webhooks.
+
+Supports optional debouncing: when ``debounce_ms > 0``, rapid partial fills
+for the same ``orderId`` are collected in memory and aggregated into a single
+webhook after a quiet period of ``debounce_ms`` milliseconds.
+"""
 
 import asyncio
 import logging
+import sqlite3
 
+from dedup import get_processed_ids, is_processed, mark_processed, mark_processed_batch, prune
 from ib_async import IB
 from ib_async import Trade as IBTrade
 from ib_async.objects import CommissionReport
 from ib_async.objects import Fill as IBFill
 
-from models_poller import BuySell, Source, Trade, WebhookPayload
+from models_poller import (
+    BuySell,
+    Fill,
+    Source,
+    Trade,
+    WebhookPayload,
+    aggregate_fills,
+)
 from notifier.base import BaseNotifier
 
 log = logging.getLogger("ib-listener")
@@ -19,8 +33,8 @@ _SIDE_MAP: dict[str, BuySell] = {
 }
 
 
-def _map_to_trade(trade: IBTrade, fill: IBFill, source: Source) -> Trade:
-    """Convert an ib_async Trade + single Fill into a poller Trade."""
+def _map_to_fill(trade: IBTrade, fill: IBFill, source: Source) -> Fill:
+    """Convert an ib_async Trade + single Fill into a poller Fill."""
     ex = fill.execution
     cr = fill.commissionReport
     o = trade.order
@@ -39,11 +53,9 @@ def _map_to_trade(trade: IBTrade, fill: IBFill, source: Source) -> Trade:
         commission_currency = cr.currency or ""
         realized_pnl = cr.realizedPNL if cr.realizedPNL != 1.7976931348623157e308 else 0.0
 
-    return Trade(
+    return Fill(
         source=source,
         ibExecId=ex.execId,
-        execIds=[ex.execId],
-        fillCount=1,
         orderId=str(o.permId),
         buySell=side,
         quantity=ex.shares,
@@ -60,38 +72,168 @@ def _map_to_trade(trade: IBTrade, fill: IBFill, source: Source) -> Trade:
     )
 
 
-class ListenerNamespace:
-    """Subscribes to ib_async trade events and dispatches webhooks."""
+def _fill_to_trade(fill: Fill) -> Trade:
+    """Wrap a single Fill in a 1-fill Trade for immediate dispatch."""
+    return Trade(
+        **{f: getattr(fill, f) for f in Fill.model_fields},
+        execIds=[fill.ibExecId],
+        fillCount=1,
+    )
 
-    def __init__(self, ib: IB, notifiers: list[BaseNotifier]) -> None:
+
+class ListenerNamespace:
+    """Subscribes to ib_async trade events and dispatches webhooks.
+
+    When ``debounce_ms > 0``, ``commissionReportEvent`` fills are buffered
+    per ``orderId`` and flushed after a quiet period.  When ``debounce_ms == 0``
+    (default), each event dispatches immediately (legacy behaviour).
+    """
+
+    def __init__(
+        self,
+        ib: IB,
+        notifiers: list[BaseNotifier],
+        db: sqlite3.Connection,
+        *,
+        debounce_ms: int = 0,
+    ) -> None:
         self._ib = ib
         self._notifiers = notifiers
+        self._db = db
+        self._debounce_s = debounce_ms / 1000.0
+
+        # Debounce state (only used when debounce_ms > 0)
+        self._pending: dict[str, list[Fill]] = {}
+        self._timers: dict[str, asyncio.TimerHandle] = {}
+
+    _PRUNE_INTERVAL = 86400  # 24 hours
 
     def start(self) -> None:
         """Subscribe to execution and commission report events."""
         self._ib.execDetailsEvent += self._on_exec_details
         self._ib.commissionReportEvent += self._on_commission_report
-        log.info("Listener subscribed to execDetailsEvent + commissionReportEvent")
+        mode = f"debounce={self._debounce_s}s" if self._debounce_s > 0 else "immediate"
+        log.info("Listener subscribed to execDetailsEvent + commissionReportEvent (%s)", mode)
+
+        # Prune old dedup entries at startup, then daily
+        self._prune()
+        self._schedule_prune()
+
+    def _prune(self) -> None:
+        """Delete dedup entries older than 30 days."""
+        try:
+            prune(self._db, days=30)
+        except Exception:
+            log.exception("Dedup prune failed")
+
+    def _schedule_prune(self) -> None:
+        """Schedule the next daily prune."""
+        loop = asyncio.get_event_loop()
+        loop.call_later(self._PRUNE_INTERVAL, self._run_scheduled_prune)
+
+    def _run_scheduled_prune(self) -> None:
+        """Run prune and reschedule."""
+        self._prune()
+        self._schedule_prune()
+
+    # ── execDetailsEvent (always immediate, no dedup) ────────────────────
 
     def _on_exec_details(self, trade: IBTrade, fill: IBFill) -> None:
-        mapped = _map_to_trade(trade, fill, "execDetailsEvent")
+        mapped = _map_to_fill(trade, fill, "execDetailsEvent")
         log.info(
             "execDetailsEvent: %s %s %s @ %.4f (execId=%s)",
             mapped.buySell.value, mapped.quantity, mapped.symbol,
             mapped.price, mapped.ibExecId,
         )
-        self._dispatch(mapped)
+        self._dispatch(_fill_to_trade(mapped))
+
+    # ── commissionReportEvent ────────────────────────────────────────────
 
     def _on_commission_report(
         self, trade: IBTrade, fill: IBFill, report: CommissionReport,
     ) -> None:
-        mapped = _map_to_trade(trade, fill, "commissionReportEvent")
+        mapped = _map_to_fill(trade, fill, "commissionReportEvent")
+
+        if self._debounce_s > 0:
+            self._enqueue(mapped)
+        else:
+            self._dispatch_immediate(mapped)
+
+    def _dispatch_immediate(self, mapped: Fill) -> None:
+        """Legacy path: dedup + dispatch a single fill immediately."""
+        if is_processed(self._db, mapped.ibExecId):
+            log.info(
+                "commissionReportEvent skipped (duplicate): %s %s %s (execId=%s)",
+                mapped.buySell.value, mapped.quantity, mapped.symbol, mapped.ibExecId,
+            )
+            return
+
         log.info(
             "commissionReportEvent: %s %s %s commission=%.4f (execId=%s)",
             mapped.buySell.value, mapped.quantity, mapped.symbol,
             mapped.commission, mapped.ibExecId,
         )
-        self._dispatch(mapped)
+        mark_processed(self._db, mapped.ibExecId)
+        self._dispatch(_fill_to_trade(mapped))
+
+    # ── Debounce logic ───────────────────────────────────────────────────
+
+    def _enqueue(self, fill: Fill) -> None:
+        """Buffer a fill and (re)start the debounce timer for its orderId."""
+        order_id = fill.orderId
+        log.info(
+            "commissionReportEvent buffered: %s %s %s (execId=%s, orderId=%s)",
+            fill.buySell.value, fill.quantity, fill.symbol,
+            fill.ibExecId, order_id,
+        )
+        self._pending.setdefault(order_id, []).append(fill)
+
+        # Cancel existing timer and start a new one
+        existing = self._timers.pop(order_id, None)
+        if existing is not None:
+            existing.cancel()
+
+        loop = asyncio.get_event_loop()
+        handle = loop.call_later(self._debounce_s, self._flush, order_id)
+        self._timers[order_id] = handle
+
+    def _flush(self, order_id: str) -> None:
+        """Flush buffered fills for an orderId: dedup → aggregate → dispatch."""
+        fills = self._pending.pop(order_id, [])
+        self._timers.pop(order_id, None)
+
+        if not fills:
+            return
+
+        # Filter against shared dedup DB
+        all_ids = {f.ibExecId for f in fills}
+        already_seen = get_processed_ids(self._db, all_ids)
+        new_fills = [f for f in fills if f.ibExecId not in already_seen]
+
+        if not new_fills:
+            log.info(
+                "Debounce flush: all %d fill(s) for orderId=%s already processed, skipping",
+                len(fills), order_id,
+            )
+            return
+
+        # Aggregate new fills into a single Trade
+        trades = aggregate_fills(new_fills)
+        if not trades:
+            return
+
+        trade = trades[0]  # All fills share the same orderId → 1 trade
+        log.info(
+            "Debounce flush: %s %s orderId=%s — %d new fill(s), qty=%.4f, avgPrice=%.4f",
+            trade.buySell.value, trade.symbol, order_id,
+            trade.fillCount, trade.quantity, trade.price,
+        )
+
+        # Mark as processed, then dispatch
+        mark_processed_batch(self._db, [f.ibExecId for f in new_fills])
+        self._dispatch(trade)
+
+    # ── Dispatch ─────────────────────────────────────────────────────────
 
     def _dispatch(self, trade: Trade) -> None:
         """Fire webhook in a background thread (non-blocking)."""

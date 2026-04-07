@@ -17,3 +17,7 @@ services/remote-client/**/__pycache__/
 !services/notifier/**
 services/notifier/**/test_*.py
 services/notifier/**/__pycache__/
+
+!services/dedup/**
+services/dedup/**/test_*.py
+services/dedup/**/__pycache__/

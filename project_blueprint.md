@@ -155,6 +155,16 @@ These are non-negotiable. Every rule below applies from the first commit.
 - **No `# type: ignore` without justification.** Fix the root cause. If suppression is unavoidable, include a reason: `# type: ignore[attr-defined]  # kraken lib has no stubs`.
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)`. Use explicit keyword arguments or `model_copy(update=...)`.
 - **Prefer strict `Literal` types over bare `str`** on Pydantic models when a field has a known set of valid values.
+- **aiohttp middleware handler type** — do NOT use `web.RequestHandler` as the `handler` parameter type in `@web.middleware` functions. It is not callable under mypy strict. Use `Callable[[web.Request], Awaitable[web.StreamResponse]]` instead:
+
+  ```python
+  from collections.abc import Awaitable, Callable
+  _Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
+
+  @web.middleware
+  async def auth_middleware(request: web.Request, handler: _Handler) -> web.StreamResponse:
+      ...
+  ```
 
 ### 3.4 Pydantic
 
@@ -210,6 +220,7 @@ kraken_relay/
 ├── .env.example                 # Template — copy to .env, fill in values
 ├── .env.test.example            # Template for E2E test credentials
 ├── .gitignore
+├── README.md                    # Project overview, setup, deploy, config
 ├── .github/
 │   ├── copilot-instructions.md  # Agent guidelines (adapt from this blueprint)
 │   └── workflows/
@@ -244,9 +255,7 @@ kraken_relay/
 │   │   ├── listener/            # Core WebSocket logic (package)
 │   │   │   ├── __init__.py      # KrakenWS class, reconnection loop
 │   │   │   ├── ws_parser.py     # Parse Kraken WS messages into Fill/Trade models
-│   │   │   ├── test_ws_parser.py
-│   │   │   ├── dedup.py         # SQLite dedup (processed_fills table, txid key)
-│   │   │   └── test_dedup.py
+│   │   │   └── test_ws_parser.py
 │   │   ├── routes/              # HTTP API
 │   │   │   ├── __init__.py      # create_routes()
 │   │   │   ├── middlewares.py   # Auth middleware (Bearer token)
@@ -261,7 +270,7 @@ kraken_relay/
 │   │   ├── main.py              # Entrypoint (polling loop + HTTP API)
 │   │   ├── models_poller.py     # Pydantic models (may share with listener)
 │   │   ├── poller/              # Core polling logic (package)
-│   │   │   ├── __init__.py      # poll_once(), SQLite dedup
+│   │   │   ├── __init__.py      # poll_once(), watermark management
 │   │   │   ├── rest_client.py   # Kraken REST API client (authenticated)
 │   │   │   ├── test_rest_client.py
 │   │   │   └── test_poller.py
@@ -278,6 +287,9 @@ kraken_relay/
 │       ├── webhook.py           # WebhookNotifier: HMAC-SHA256 signed HTTP POST
 │       ├── test_notifier.py     # Tests for registry and loader
 │       └── test_webhook.py      # Tests for webhook backend
+│   └── dedup/                   # SQLite dedup (shared library, no container)
+│       ├── __init__.py          # init_db(), is_processed(), mark_processed(), prune()
+│       └── test_dedup.py
 ├── infra/
 │   └── caddy/
 │       ├── Caddyfile            # Shell: imports from sites/ and domains/
@@ -315,6 +327,7 @@ allow source directories. Each service that `COPY`s code must be allowed here.
 !services/listener/**
 !services/poller/**
 !services/notifier/**
+!services/dedup/**
 
 # Re-exclude test files and caches from allowed dirs
 services/listener/**/test_*.py
@@ -323,16 +336,47 @@ services/poller/**/test_*.py
 services/poller/**/__pycache__/
 services/notifier/**/test_*.py
 services/notifier/**/__pycache__/
+services/dedup/**/test_*.py
+services/dedup/**/__pycache__/
 ```
 
 When adding a new standalone module under `services/`, you MUST add a
 `!services/<module>/**` entry here — otherwise `COPY` in the Dockerfile will
 fail with a cryptic "not found" error.
 
+### `.gitignore`
+
+```gitignore
+.env
+.env.test
+.pause-state
+.venv/
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/*.tfplan
+*.tfvars
+**/__pycache__/
+```
+
+**Do NOT add `.mypy_cache/`, `.pytest_cache/`, or `.ruff_cache/`** — these tools
+auto-generate their own `.gitignore` file (containing `*`) inside their cache
+directories on first run. Adding them to the project `.gitignore` is redundant.
+
+**Do NOT add `.deployed-sha`** — this file only exists on the droplet (written
+by `cli/sync.py` after each `--local-files` deploy). It is never present in the
+local repo. It is excluded from rsync `--delete` so it isn't wiped on deploy,
+but it does not need to be gitignored.
+
+**Do NOT add `node_modules/`** — the `types/` package is declaration-only
+(`.d.ts` files). There is no `npm install` step and no `node_modules/` to
+ignore.
+
 ### Dockerfiles and cross-service modules
 
-Each service Dockerfile must `COPY` the notifier package since it's a separate
-module, not part of the service's own source:
+Each service Dockerfile must `COPY` shared packages (notifier, dedup) since
+they are separate modules, not part of the service's own source:
 
 ```dockerfile
 FROM python:3.11-slim
@@ -344,12 +388,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY services/listener/listener/ ./listener/
 COPY services/listener/routes/ ./routes/
 COPY services/listener/main.py services/listener/models_listener.py ./
+COPY services/dedup/ ./dedup/
 COPY services/notifier/ ./notifier/
 
 CMD ["python", "main.py"]
 ```
 
-Because the notifier is `COPY`'d from outside the service directory, the
+Because shared packages are `COPY`'d from outside the service directory, the
 Dockerfile's `context` must be the project root (`.`), not `./services/listener`:
 
 ```yaml
@@ -401,7 +446,7 @@ webhooks when order executions are detected.
 3. Subscribe to `executions` channel
 4. For each message:
    a. Parse into Fill model (ws_parser.py)
-   b. Check SQLite dedup (dedup.py) — skip if already processed
+   b. Check dedup (services/dedup/) — skip if already processed
    c. Aggregate fills into Trade (by orderId / txid)
    d. Send via notifier (notify())
    e. Mark as processed in SQLite
@@ -420,7 +465,11 @@ webhooks when order executions are detected.
 - `GET /health` — returns `{"status": "ok", "connected": true/false, "lastMessageAt": "..."}`.
 - `GET /kraken/listener/status` — detailed status (uptime, message count, last trade).
 
-**SQLite Dedup:**
+**SQLite Dedup (shared `services/dedup/` module):**
+
+Both the listener and poller use the shared `dedup` package for deduplication.
+Each service passes its own `db_path` to `init_db()` so they maintain separate
+databases.
 
 - `processed_fills` table with `exec_id TEXT PRIMARY KEY` and `processed_at TEXT DEFAULT (datetime('now'))`, keyed by Kraken `txid`.
 - Timestamp watermark pre-filter to reduce DB lookups.
@@ -454,8 +503,9 @@ as a reliability fallback. Catches fills that the WebSocket missed.
 - `GET /health` — returns `{"status": "ok"}`.
 - `POST /kraken/poller/run` — trigger immediate poll (auth required).
 
-**SQLite:** Same schema as listener but separate DB file (`/data/poller.db`,
-volume `poller-data:/data`).
+**SQLite:** Same dedup module (`services/dedup/`) as listener but separate
+DB file (`/data/poller.db`, volume `poller-data:/data`). The poller's `init_db()`
+additionally creates a `watermark` table on top of the shared dedup schema.
 
 ---
 
@@ -693,17 +743,23 @@ services:
     restart: "no"
     environment:
       API_TOKEN: test-token
-      KRAKEN_API_KEY: ${KRAKEN_API_KEY}       # from .env.test
+      KRAKEN_API_KEY: ${KRAKEN_API_KEY} # from .env.test
       KRAKEN_API_SECRET: ${KRAKEN_API_SECRET} # from .env.test
-      PYTHONPATH: /opt                        # for notifier at /opt/notifier
+      PYTHONPATH: /opt # for notifier + dedup at /opt/*
     ports:
       - "15010:5000"
     volumes:
-      - ./services/listener:/app              # bind-mount source for hot-reload
-      - ./services/notifier:/opt/notifier     # cross-service module (see below)
+      - ./services/listener:/app # bind-mount source for hot-reload
+      - ./services/notifier:/opt/notifier # cross-service module (see below)
+      - ./services/dedup:/opt/dedup # cross-service module
     healthcheck:
-      test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')",
+        ]
       interval: 3s
       timeout: 5s
       retries: 20
@@ -715,16 +771,22 @@ services:
       API_TOKEN: test-token
       KRAKEN_API_KEY: ${KRAKEN_API_KEY}
       KRAKEN_API_SECRET: ${KRAKEN_API_SECRET}
-      POLL_INTERVAL_SECONDS: "99999"          # effectively disable auto-poll
+      POLL_INTERVAL_SECONDS: "99999" # effectively disable auto-poll
       PYTHONPATH: /opt
     ports:
       - "15011:8000"
     volumes:
       - ./services/poller:/app
       - ./services/notifier:/opt/notifier
+      - ./services/dedup:/opt/dedup
     healthcheck:
-      test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
       interval: 3s
       timeout: 5s
       retries: 20
@@ -748,26 +810,31 @@ In tests, a bind mount like `./services/listener:/app` **replaces the entire
 
 ### Cross-service modules (the PYTHONPATH trick)
 
-The notifier package is `COPY`'d into `/app/notifier/` by the Dockerfile. But
-the bind mount `./services/listener:/app` wipes it. You need a second mount:
+Cross-service packages (`notifier`, `dedup`) are `COPY`'d into `/app/` by the
+Dockerfile. But the bind mount `./services/listener:/app` wipes them. You need
+separate mounts for each:
 
 **WRONG** — nested mount inside `/app`:
+
 ```yaml
 volumes:
   - ./services/listener:/app
-  - ./services/notifier:/app/notifier    # BROKEN: nested bind mount
+  - ./services/notifier:/app/notifier # BROKEN: nested bind mount
 ```
+
 Docker creates `services/listener/notifier/` on the host to back the nested
 mount point. On `docker compose restart`, this empty host directory shadows the
 real content → `ImportError`.
 
 **CORRECT** — mount outside `/app`, add to `PYTHONPATH`:
+
 ```yaml
 volumes:
   - ./services/listener:/app
-  - ./services/notifier:/opt/notifier    # separate path, no nesting
+  - ./services/notifier:/opt/notifier # separate path, no nesting
+  - ./services/dedup:/opt/dedup
 environment:
-  PYTHONPATH: /opt                       # Python finds notifier at /opt/notifier
+  PYTHONPATH: /opt # Python finds notifier + dedup at /opt/*
 ```
 
 ### Port convention
@@ -824,6 +891,7 @@ services:
     volumes:
       - ./services/listener:/app
       - ./services/notifier:/opt/notifier
+      - ./services/dedup:/opt/dedup
     environment:
       PYTHONPATH: /opt
 
@@ -833,6 +901,7 @@ services:
     volumes:
       - ./services/poller:/app
       - ./services/notifier:/opt/notifier
+      - ./services/dedup:/opt/dedup
     environment:
       PYTHONPATH: /opt
 
@@ -842,14 +911,14 @@ services:
 
 ### Differences from test overlay
 
-| Aspect          | `docker-compose.local.yml`          | `docker-compose.test.yml`                 |
-| --------------- | ----------------------------------- | ----------------------------------------- |
-| Purpose         | Manual dev / debugging              | Automated E2E tests                       |
-| Ports           | Standard (5000, 8000)               | Offset (15010, 15011) to avoid collisions |
-| Env overrides   | Uses `.env` values                  | Hardcoded `test-token`, `--env-file .env.test` |
-| Healthchecks    | None                                | Added (for `make e2e-up` readiness wait)  |
-| `restart`       | Inherits `always` from base         | `"no"` (fail-fast for tests)              |
-| Bind mounts     | Same pattern (source + notifier)    | Same pattern                              |
+| Aspect        | `docker-compose.local.yml`       | `docker-compose.test.yml`                      |
+| ------------- | -------------------------------- | ---------------------------------------------- |
+| Purpose       | Manual dev / debugging           | Automated E2E tests                            |
+| Ports         | Standard (5000, 8000)            | Offset (15010, 15011) to avoid collisions      |
+| Env overrides | Uses `.env` values               | Hardcoded `test-token`, `--env-file .env.test` |
+| Healthchecks  | None                             | Added (for `make e2e-up` readiness wait)       |
+| `restart`     | Inherits `always` from base      | `"no"` (fail-fast for tests)                   |
+| Bind mounts   | Same pattern (source + notifier) | Same pattern                                   |
 
 ---
 
@@ -1007,6 +1076,35 @@ local-down:   ## Stop local dev stack
 poll:         ## Trigger immediate Kraken poll
 ```
 
+### `MYPYPATH` for cross-service imports
+
+Each `make typecheck` invocation sets `MYPYPATH` so mypy can resolve imports
+across service boundaries. **When one service imports models from another** (e.g.
+the poller imports `models_listener` from the listener), both service dirs must
+be on `MYPYPATH`:
+
+```makefile
+typecheck:
+	MYPYPATH=services/listener:services $(PYTHON) -m mypy services/listener/
+	MYPYPATH=services/poller:services/listener:services $(PYTHON) -m mypy services/poller/
+	MYPYPATH=services $(PYTHON) -m mypy services/notifier/
+```
+
+The poller needs `services/listener` on its path because `models_poller.py`
+re-exports from `models_listener`. Without it, mypy reports
+`"Skipping analyzing 'models_listener': module is installed, but missing
+library stubs or py.typed marker"`.
+
+### `PYTHONPATH` for tests
+
+The `test` target sets `PYTHONPATH` to include all service directories so
+pytest can resolve cross-service imports:
+
+```makefile
+test:
+	PYTHONPATH=.:services/listener:services/poller:services $(PYTHON) -m pytest -v
+```
+
 ---
 
 ## 14. pyproject.toml
@@ -1099,16 +1197,16 @@ Order: lint → typecheck → test (fastest to slowest, fail early).
 Build in this sequence. Run `make lint`, `make typecheck`, and `make test` after
 every step.
 
-1. **Scaffold** — repo init, `.gitignore`, `pyproject.toml`, `requirements-dev.txt`, `Makefile` (setup/lint/typecheck/test targets), empty `services/` dirs.
+1. **Scaffold** — repo init, `.gitignore`, `README.md`, `pyproject.toml`, `requirements-dev.txt`, `Makefile` (setup/lint/typecheck/test targets), empty `services/` dirs.
 2. **Models** — `models_listener.py` with `Fill`, `Trade`, `WebhookPayload`, `BuySell`. Write tests.
-3. **Dedup** — `listener/dedup.py` (SQLite init, check, mark, prune). Write tests.
+3. **Dedup** — `services/dedup/` shared module (SQLite init, check, mark, prune). Write tests.
 4. **Notifier** — `services/notifier/` (base ABC, webhook backend, registry, loader). Copy from `ibkr_relay` and adapt. Write tests.
 5. **WS Parser** — `listener/ws_parser.py` (parse Kraken WS JSON into Fill models). Write tests with sample messages.
 6. **Listener core** — `listener/__init__.py` (WS connect, subscribe, reconnect loop, integration of parser + dedup + notifier).
 7. **HTTP health API** — `routes/health.py`, `routes/middlewares.py`.
 8. **Listener entrypoint** — `main.py` (start WS + HTTP concurrently).
 9. **Dockerfile + docker-compose.yml** — containerize listener.
-10. **Poller** — same sequence (REST client → parser → dedup → notifier → routes → main → Dockerfile).
+10. **Poller** — same sequence (REST client → parser → routes → main → Dockerfile). Dedup is already shared from step 3.
 11. **CLI** — Copy `cli/core/` from `ibkr_relay` as-is. Write `cli/__init__.py` with Kraken `CoreConfig`. Write `cli/__main__.py` importing `register_parsers()` + `CORE_MODULES`. Add `cli/poll.py` (project-specific).
 12. **Terraform** — `main.tf`, `variables.tf`, `outputs.tf`, `cloud-init.sh`, `env.tftpl`.
 13. **Caddy** — `Caddyfile` (standalone), `kraken.caddy` (shared snippet).

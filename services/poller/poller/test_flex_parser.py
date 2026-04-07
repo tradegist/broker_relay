@@ -2,8 +2,8 @@
 
 import pytest
 
-from models_poller import BuySell, Fill, Trade
-from poller.flex_parser import _dedup_id, aggregate_fills, parse_fills
+from models_poller import BuySell, Fill, Trade, _dedup_id, aggregate_fills
+from poller.flex_parser import parse_fills
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -424,13 +424,13 @@ class TestDedup:
 class TestDedupId:
     """_dedup_id returns the best available unique identifier."""
 
-    def test_prefers_transactionId(self) -> None:
+    def test_prefers_ibExecId(self) -> None:
         fill = Fill(buySell=BuySell.BUY, source="flex", transactionId="T1", ibExecId="E1", tradeID="X1")
-        assert _dedup_id(fill) == "T1"
-
-    def test_falls_back_to_ibExecId(self) -> None:
-        fill = Fill(buySell=BuySell.BUY, source="flex", transactionId="", ibExecId="E1", tradeID="X1")
         assert _dedup_id(fill) == "E1"
+
+    def test_falls_back_to_transactionId(self) -> None:
+        fill = Fill(buySell=BuySell.BUY, source="flex", ibExecId="", transactionId="T1", tradeID="X1")
+        assert _dedup_id(fill) == "T1"
 
     def test_falls_back_to_tradeID(self) -> None:
         fill = Fill(buySell=BuySell.BUY, source="flex", transactionId="", ibExecId="", tradeID="X1")
@@ -618,7 +618,7 @@ class TestAggregateSingleFill:
     def test_single_fill_exec_id(self) -> None:
         fills, _ = parse_fills(_wrap_af(AF_AAPL))
         trades = aggregate_fills(fills)
-        assert trades[0].execIds == ["22222222222"]
+        assert trades[0].execIds == ["00018d97.00000001.01.01"]
 
 
 class TestAggregateMultipleFills:

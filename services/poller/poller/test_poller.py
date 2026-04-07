@@ -5,13 +5,13 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from dedup import get_processed_ids, mark_processed_batch
 
 from models_poller import Fill, Trade, WebhookPayload
 from poller import (
     get_last_poll_ts,
-    get_processed_ids,
-    init_db,
-    mark_processed,
+    init_dedup_db,
+    init_meta_db,
     poll_once,
     prune_old,
     set_last_poll_ts,
@@ -20,8 +20,8 @@ from poller import (
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
 @pytest.fixture()
-def db() -> sqlite3.Connection:
-    """In-memory SQLite database, initialized with schema."""
+def dedup_db() -> sqlite3.Connection:
+    """In-memory SQLite dedup database for tests."""
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS processed_fills (
@@ -29,6 +29,14 @@ def db() -> sqlite3.Connection:
             processed_at TEXT DEFAULT (datetime('now'))
         )
     """)
+    conn.commit()
+    return conn
+
+
+@pytest.fixture()
+def meta_db() -> sqlite3.Connection:
+    """In-memory SQLite metadata database for tests."""
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS metadata (
             key TEXT PRIMARY KEY,
@@ -78,74 +86,76 @@ def _make_trade(**overrides: Any) -> Trade:
 # ═════════════════════════════════════════════════════════════════════════
 
 class TestInitDb:
-    def test_creates_tables(self) -> None:
-        # Patch DB_PATH so init_db uses our in-memory connection pattern
-        with patch("poller.DB_PATH", ":memory:"):
-            db = init_db()
+    def test_dedup_creates_table(self) -> None:
+        with patch("poller.DEDUP_DB_PATH", ":memory:"):
+            db = init_dedup_db()
         tables = {
             r[0] for r in db.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
         assert "processed_fills" in tables
-        assert "metadata" in tables
         db.close()
 
-    def test_idempotent(self) -> None:
-        with patch("poller.DB_PATH", ":memory:"):
-            db = init_db()
-            # Running again should not raise
-            # (same connection won't work for :memory:, but tests CREATE IF NOT EXISTS)
+    def test_meta_creates_table(self) -> None:
+        with patch("poller.META_DB_PATH", ":memory:"):
+            db = init_meta_db()
+        tables = {
+            r[0] for r in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "metadata" in tables
         db.close()
 
 
 class TestTimestampWatermark:
-    def test_get_returns_empty_when_unset(self, db: sqlite3.Connection) -> None:
-        assert get_last_poll_ts(db) == ""
+    def test_get_returns_empty_when_unset(self, meta_db: sqlite3.Connection) -> None:
+        assert get_last_poll_ts(meta_db) == ""
 
-    def test_set_and_get(self, db: sqlite3.Connection) -> None:
-        set_last_poll_ts(db, "20250403;120000")
-        assert get_last_poll_ts(db) == "20250403;120000"
+    def test_set_and_get(self, meta_db: sqlite3.Connection) -> None:
+        set_last_poll_ts(meta_db, "20250403;120000")
+        assert get_last_poll_ts(meta_db) == "20250403;120000"
 
-    def test_update_overwrites(self, db: sqlite3.Connection) -> None:
-        set_last_poll_ts(db, "20250401;000000")
-        set_last_poll_ts(db, "20250403;120000")
-        assert get_last_poll_ts(db) == "20250403;120000"
+    def test_update_overwrites(self, meta_db: sqlite3.Connection) -> None:
+        set_last_poll_ts(meta_db, "20250401;000000")
+        set_last_poll_ts(meta_db, "20250403;120000")
+        assert get_last_poll_ts(meta_db) == "20250403;120000"
 
 
 class TestProcessedIds:
-    def test_empty_set_returns_empty(self, db: sqlite3.Connection) -> None:
-        assert get_processed_ids(db, set()) == set()
+    def test_empty_set_returns_empty(self, dedup_db: sqlite3.Connection) -> None:
+        assert get_processed_ids(dedup_db, set()) == set()
 
-    def test_unknown_ids_return_empty(self, db: sqlite3.Connection) -> None:
-        assert get_processed_ids(db, {"X1", "X2"}) == set()
+    def test_unknown_ids_return_empty(self, dedup_db: sqlite3.Connection) -> None:
+        assert get_processed_ids(dedup_db, {"X1", "X2"}) == set()
 
-    def test_mark_and_retrieve(self, db: sqlite3.Connection) -> None:
-        mark_processed(db, ["E1", "E2", "E3"])
-        found = get_processed_ids(db, {"E1", "E3", "E99"})
+    def test_mark_and_retrieve(self, dedup_db: sqlite3.Connection) -> None:
+        mark_processed_batch(dedup_db, ["E1", "E2", "E3"])
+        found = get_processed_ids(dedup_db, {"E1", "E3", "E99"})
         assert found == {"E1", "E3"}
 
-    def test_mark_idempotent(self, db: sqlite3.Connection) -> None:
-        mark_processed(db, ["E1"])
-        mark_processed(db, ["E1"])  # INSERT OR IGNORE
-        rows = db.execute("SELECT COUNT(*) FROM processed_fills").fetchone()
+    def test_mark_idempotent(self, dedup_db: sqlite3.Connection) -> None:
+        mark_processed_batch(dedup_db, ["E1"])
+        mark_processed_batch(dedup_db, ["E1"])  # INSERT OR IGNORE
+        rows = dedup_db.execute("SELECT COUNT(*) FROM processed_fills").fetchone()
         assert rows[0] == 1
 
 
 class TestPruneOld:
-    def test_prune_removes_old_entries(self, db: sqlite3.Connection) -> None:
+    def test_prune_removes_old_entries(self, dedup_db: sqlite3.Connection) -> None:
         # Insert an entry with an old timestamp
-        db.execute(
+        dedup_db.execute(
             "INSERT INTO processed_fills (exec_id, processed_at) VALUES (?, datetime('now', '-60 days'))",
             ("OLD1",),
         )
-        db.execute(
+        dedup_db.execute(
             "INSERT INTO processed_fills (exec_id, processed_at) VALUES (?, datetime('now'))",
             ("NEW1",),
         )
-        db.commit()
-        prune_old(db, days=30)
-        remaining = {r[0] for r in db.execute("SELECT exec_id FROM processed_fills").fetchall()}
+        dedup_db.commit()
+        prune_old(dedup_db, days=30)
+        remaining = {r[0] for r in dedup_db.execute("SELECT exec_id FROM processed_fills").fetchall()}
         assert "OLD1" not in remaining
         assert "NEW1" in remaining
 
@@ -167,10 +177,11 @@ class TestPollOnce:
         mock_parse: MagicMock,
         mock_agg: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         mock_fetch.return_value = None
-        result = poll_once(db)
+        result = poll_once(dedup_db, meta_db)
         assert result == []
         mock_parse.assert_not_called()
         mock_notify.assert_not_called()
@@ -185,11 +196,12 @@ class TestPollOnce:
         mock_parse: MagicMock,
         mock_agg: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         mock_fetch.return_value = "<xml/>"
         mock_parse.return_value = ([], [])
-        result = poll_once(db)
+        result = poll_once(dedup_db, meta_db)
         assert result == []
         mock_agg.assert_called_once_with([])
         mock_notify.assert_not_called()
@@ -204,7 +216,8 @@ class TestPollOnce:
         mock_parse: MagicMock,
         mock_agg: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         fill = _make_fill()
         trade = _make_trade()
@@ -212,7 +225,7 @@ class TestPollOnce:
         mock_parse.return_value = ([fill], [])
         mock_agg.return_value = [trade]
 
-        result = poll_once(db)
+        result = poll_once(dedup_db, meta_db)
 
         assert len(result) == 1
         assert result[0].symbol == "AAPL"
@@ -231,7 +244,8 @@ class TestPollOnce:
         mock_parse: MagicMock,
         mock_agg: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         fill = _make_fill(transactionId="TX99")
         trade = _make_trade(transactionId="TX99", execIds=["TX99"])
@@ -239,10 +253,10 @@ class TestPollOnce:
         mock_parse.return_value = ([fill], [])
         mock_agg.return_value = [trade]
 
-        poll_once(db)
+        poll_once(dedup_db, meta_db)
 
         # Verify TX99 is now in the DB
-        found = get_processed_ids(db, {"TX99"})
+        found = get_processed_ids(dedup_db, {"TX99"})
         assert "TX99" in found
 
     @patch("poller.notify")
@@ -255,17 +269,18 @@ class TestPollOnce:
         mock_parse: MagicMock,
         mock_agg: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         """Fills already in the DB are not re-sent."""
-        mark_processed(db, ["TX1"])
+        mark_processed_batch(dedup_db, ["TX1"])
 
         fill = _make_fill(transactionId="TX1")
         mock_fetch.return_value = "<xml/>"
         mock_parse.return_value = ([fill], [])
         mock_agg.return_value = []  # all fills filtered → aggregate gets empty
 
-        result = poll_once(db)
+        result = poll_once(dedup_db, meta_db)
 
         assert result == []
         mock_notify.assert_not_called()
@@ -280,7 +295,8 @@ class TestPollOnce:
         mock_parse: MagicMock,
         mock_agg: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         fill = _make_fill(dateTime="20250403;150000")
         trade = _make_trade(dateTime="20250403;150000", execIds=["TX1"])
@@ -288,9 +304,9 @@ class TestPollOnce:
         mock_parse.return_value = ([fill], [])
         mock_agg.return_value = [trade]
 
-        poll_once(db)
+        poll_once(dedup_db, meta_db)
 
-        assert get_last_poll_ts(db) == "20250403;150000"
+        assert get_last_poll_ts(meta_db) == "20250403;150000"
 
     @patch("poller.notify")
     @patch("poller.aggregate_fills")
@@ -302,10 +318,11 @@ class TestPollOnce:
         mock_parse: MagicMock,
         mock_agg: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         """Fills older than the watermark are filtered by timestamp pre-filter."""
-        set_last_poll_ts(db, "20250403;120000")
+        set_last_poll_ts(meta_db, "20250403;120000")
 
         old_fill = _make_fill(transactionId="OLD", dateTime="20250403;100000")
         new_fill = _make_fill(transactionId="NEW", dateTime="20250403;130000")
@@ -313,18 +330,20 @@ class TestPollOnce:
         mock_fetch.return_value = "<xml/>"
         mock_parse.return_value = ([old_fill, new_fill], [])
 
-        # aggregate_fills is called twice: once for all fills (sample trade),
-        # once for new fills only — we need to return trades for the second call
+        # aggregate_fills is called twice:
+        #   1) all fills → sample trade for debug logging
+        #   2) new fills only (after watermark + dedup) → actual dispatch
         mock_agg.side_effect = [
-            [_make_trade()],  # first call: all fills for sample trade
-            [trade],          # second call: only new fills
+            [_make_trade()],   # 1st call: sample from all fills
+            [trade],           # 2nd call: only new fills after filtering
         ]
 
-        result = poll_once(db)
+        result = poll_once(dedup_db, meta_db)
 
         assert len(result) == 1
+
         # Only NEW should be processed
-        found = get_processed_ids(db, {"OLD", "NEW"})
+        found = get_processed_ids(dedup_db, {"OLD", "NEW"})
         assert "NEW" in found
         assert "OLD" not in found
 
@@ -338,7 +357,8 @@ class TestPollOnce:
         mock_parse: MagicMock,
         mock_agg: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         fill = _make_fill()
         trade = _make_trade(execIds=["TX1"])
@@ -346,7 +366,7 @@ class TestPollOnce:
         mock_parse.return_value = ([fill], ["Unknown attr: fakeField"])
         mock_agg.return_value = [trade]
 
-        poll_once(db)
+        poll_once(dedup_db, meta_db)
 
         sent_payload = mock_notify.call_args[0][1]
         assert "Unknown attr: fakeField" in sent_payload.errors
@@ -361,12 +381,13 @@ class TestPollOnce:
         mock_parse: MagicMock,
         mock_agg: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         """replay=N re-sends N fills even if already processed."""
         fill = _make_fill(transactionId="TX1")
         trade = _make_trade(execIds=["TX1"])
-        mark_processed(db, ["TX1"])  # already seen
+        mark_processed_batch(dedup_db, ["TX1"])  # already seen
 
         mock_fetch.return_value = "<xml/>"
         mock_parse.return_value = ([fill], [])
@@ -375,7 +396,7 @@ class TestPollOnce:
             [trade],  # second call: replay aggregate
         ]
 
-        result = poll_once(db, replay=1)
+        result = poll_once(dedup_db, meta_db, replay=1)
 
         assert len(result) == 1
         mock_notify.assert_called_once()
@@ -390,7 +411,8 @@ class TestPollOnce:
         mock_parse: MagicMock,
         mock_agg: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         """Multiple new trades are batched into a single webhook call."""
         f1 = _make_fill(transactionId="TX1", orderId="O1", symbol="AAPL")
@@ -402,7 +424,7 @@ class TestPollOnce:
         mock_parse.return_value = ([f1, f2], [])
         mock_agg.return_value = [t1, t2]
 
-        result = poll_once(db)
+        result = poll_once(dedup_db, meta_db)
 
         assert len(result) == 2
         mock_notify.assert_called_once()
@@ -449,12 +471,13 @@ class TestPollOnceE2E:
         self,
         mock_fetch: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         """Two fills for the same order → aggregated into 1 trade with correct values."""
         mock_fetch.return_value = _AF_XML
 
-        trades = poll_once(db)
+        trades = poll_once(dedup_db, meta_db)
 
         assert len(trades) == 1
         t = trades[0]
@@ -466,7 +489,7 @@ class TestPollOnceE2E:
         # Weighted avg price: (10*150.5 + 5*151.0) / 15 = 2260/15
         assert t.price == pytest.approx(2260 / 15, rel=1e-6)
         assert t.commission == pytest.approx(-1.5)
-        assert t.execIds == ["TX100", "TX101"]
+        assert t.execIds == ["exec.001", "exec.002"]
 
         # Webhook sent with the aggregated trade
         mock_notify.assert_called_once()
@@ -475,11 +498,11 @@ class TestPollOnceE2E:
         assert sent_payload.errors == []
 
         # Fills marked as processed
-        found = get_processed_ids(db, {"TX100", "TX101"})
-        assert found == {"TX100", "TX101"}
+        found = get_processed_ids(dedup_db, {"exec.001", "exec.002"})
+        assert found == {"exec.001", "exec.002"}
 
         # Watermark updated
-        assert get_last_poll_ts(db) == "20250403;140030"
+        assert get_last_poll_ts(meta_db) == "20250403;140030"
 
     @patch("poller.notify")
     @patch("poller.fetch_flex_report")
@@ -487,15 +510,16 @@ class TestPollOnceE2E:
         self,
         mock_fetch: MagicMock,
         mock_notify: MagicMock,
-        db: sqlite3.Connection,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
     ) -> None:
         """Polling the same XML twice produces trades only on the first call."""
         mock_fetch.return_value = _AF_XML
 
-        first = poll_once(db)
+        first = poll_once(dedup_db, meta_db)
         assert len(first) == 1
 
-        second = poll_once(db)
+        second = poll_once(dedup_db, meta_db)
         assert second == []
 
         # Notification sent only once

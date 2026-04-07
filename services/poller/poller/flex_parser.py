@@ -4,7 +4,7 @@ import logging
 import xml.etree.ElementTree as ET
 from typing import Any
 
-from models_poller import Fill, Trade
+from models_poller import Fill, _dedup_id
 
 log = logging.getLogger("flex_parser")
 
@@ -52,11 +52,6 @@ def _parse_float(value: str, field: str, errors: list[str]) -> float:
     except (ValueError, TypeError):
         errors.append(f"Bad float for '{field}': {value!r}")
         return 0.0
-
-
-def _dedup_id(fill: Fill) -> str:
-    """Return the best available unique ID for dedup (transactionId preferred)."""
-    return fill.transactionId or fill.ibExecId or fill.tradeID
 
 
 # ── Parse ────────────────────────────────────────────────────────────────
@@ -124,83 +119,3 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
         )
 
     return fills, errors
-
-
-# ── Aggregate ────────────────────────────────────────────────────────────
-
-def aggregate_fills(fills: list[Fill]) -> list[Trade]:
-    """Group fills by ``orderId`` and compute aggregated Trade objects.
-
-    * ``quantity`` — sum of all fills.
-    * ``price`` — quantity-weighted average.
-    * Financial fields (commission, taxes, …) — summed.
-    * ``dateTime`` — last fill's value (lexicographic max).
-    * String fields — last fill's value.
-    * ``execIds`` — ``transactionId`` (or best dedup ID) per fill.
-    * ``fillCount`` — number of fills in the group.
-    """
-    groups: dict[str, list[Fill]] = {}
-    for fill in fills:
-        if not fill.orderId:
-            continue
-        groups.setdefault(fill.orderId, []).append(fill)
-
-    trades: list[Trade] = []
-    for _order_id, order_fills in groups.items():
-        # Weighted average price
-        abs_total = sum(abs(f.quantity) for f in order_fills)
-        avg_price = (
-            sum(abs(f.quantity) * f.price for f in order_fills) / abs_total
-            if abs_total else 0.0
-        )
-
-        # Sum financial fields
-        total_quantity = sum(f.quantity for f in order_fills)
-        total_commission = sum(f.commission for f in order_fills)
-        total_taxes = sum(f.taxes for f in order_fills)
-        total_cost = sum(f.cost for f in order_fills)
-        total_trade_money = sum(f.tradeMoney for f in order_fills)
-        total_proceeds = sum(f.proceeds for f in order_fills)
-        total_net_cash = sum(f.netCash for f in order_fills)
-        total_fifo = sum(f.fifoPnlRealized for f in order_fills)
-        total_mtm = sum(f.mtmPnl for f in order_fills)
-        total_accrued = sum(f.accruedInt for f in order_fills)
-
-        last = order_fills[-1]
-        last_dt = max(f.dateTime for f in order_fills) if order_fills else ""
-
-        # Fields that are explicitly overridden below — exclude from the
-        # generic dict comprehension to avoid "multiple values" TypeError.
-        _OVERRIDE_FIELDS = {
-            "quantity", "price", "commission", "taxes", "cost",
-            "tradeMoney", "proceeds", "netCash", "fifoPnlRealized",
-            "mtmPnl", "accruedInt", "dateTime", "tradeDate",
-        }
-
-        # Build Trade from last fill's values, overriding aggregated fields.
-        # Explicit kwargs preserve type safety (model_dump() returns
-        # dict[str, Any] which defeats mypy checking).
-        trades.append(Trade(
-            **{
-                field: getattr(last, field)
-                for field in Fill.model_fields
-                if field not in _OVERRIDE_FIELDS
-            },
-            quantity=total_quantity,
-            price=round(avg_price, 8),
-            commission=round(total_commission, 4),
-            taxes=round(total_taxes, 4),
-            cost=round(total_cost, 4),
-            tradeMoney=round(total_trade_money, 4),
-            proceeds=round(total_proceeds, 4),
-            netCash=round(total_net_cash, 4),
-            fifoPnlRealized=round(total_fifo, 4),
-            mtmPnl=round(total_mtm, 4),
-            accruedInt=round(total_accrued, 4),
-            dateTime=last_dt,
-            tradeDate=max(f.tradeDate for f in order_fills),
-            execIds=[_dedup_id(f) for f in order_fills],
-            fillCount=len(order_fills),
-        ))
-
-    return trades

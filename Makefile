@@ -82,10 +82,11 @@ typecheck: ## Run mypy strict type checking
 	MYPYPATH=services/poller:services $(PYTHON) -m mypy services/poller/ cli/test_webhook.py
 	MYPYPATH=services/remote-client:services/poller:services $(PYTHON) -m mypy services/remote-client/
 	MYPYPATH=services $(PYTHON) -m mypy services/notifier/
+	MYPYPATH=services $(PYTHON) -m mypy services/dedup/
 	$(PYTHON) -m mypy schema_gen.py
 
 lint: ## Run ruff linter (use FIX=1 to auto-fix)
-	$(PYTHON) -m ruff check services/poller/ services/remote-client/ services/notifier/ cli/ schema_gen.py $(if $(FIX),--fix)
+	$(PYTHON) -m ruff check services/poller/ services/remote-client/ services/notifier/ services/dedup/ cli/ schema_gen.py $(if $(FIX),--fix)
 
 local-up: ## Start full stack locally (no TLS, direct port access)
 	@if [ -f .env ]; then \

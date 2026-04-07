@@ -11,5 +11,6 @@ COPY services/remote-client/client/ client/
 COPY services/remote-client/routes/ routes/
 COPY services/poller/models_poller.py ./
 COPY services/notifier/ ./notifier/
+COPY services/dedup/ ./dedup/
 
 CMD ["python", "-u", "main.py"]
