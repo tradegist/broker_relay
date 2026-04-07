@@ -192,7 +192,15 @@ These are non-negotiable. Every rule below applies from the first commit.
 - **Never use TOCTOU patterns with locks.** Lock acquisition must BE the check.
 - **Financial operations require extra scrutiny** for race conditions, double-execution, partial failure, and idempotency.
 
-### 3.6 Testing
+### 3.6 Reliability
+
+- **Mark-after-notify, never before.** `mark_processed_batch()` must only run AFTER `notify()` completes successfully. A crash between mark and notify silently drops fills — the fill is recorded as processed but the webhook was never sent. Neither the listener (dedup skips it) nor the poller (dedup skips it) will ever retry it. This is unrecoverable data loss.
+- **The correct pattern:** run `notify()` and `mark_processed_batch()` sequentially in the same execution context (same thread or `asyncio.to_thread` call). If `notify()` raises, the fill remains unprocessed and will be retried on the next cycle.
+- **Never separate mark from notify with an `await` boundary.** Keep them atomic within a single synchronous block.
+- **Replay mode is the exception.** Replay intentionally skips dedup for debugging/recovery.
+- **SQLite commits must be explicit.** After any `INSERT`/`UPDATE`, call `conn.commit()` immediately.
+
+### 3.7 Testing
 
 - **Unit tests are colocated** next to the source file: `ws_parser.py` → `test_ws_parser.py`.
 - **E2E tests live in `tests/e2e/`** within each service.
@@ -201,19 +209,19 @@ These are non-negotiable. Every rule below applies from the first commit.
 - **No cross-test dependencies.** Every test must be self-contained.
 - **pytest** with `--import-mode=importlib`.
 
-### 3.7 Docker
+### 3.8 Docker
 
 - **Never use `env_file:` in service definitions.** Always declare each env var explicitly in the `environment:` block with `${VAR}` interpolation.
 - **`.dockerignore` uses an allowlist** (`*` to exclude everything, then `!services/listener/**` etc.). When adding a new standalone module (e.g. `services/notifier/`), add a `!services/<module>/**` entry.
 - **Never nest bind mounts in `docker-compose.test.yml`.** If a service mounts `./services/poller:/app` and you also need `services/notifier/`, mount it at a separate path outside `/app` (e.g. `./services/notifier:/opt/notifier`) and add `PYTHONPATH: /opt` to the service's `environment:` block. Mounting inside the first mount causes Docker to auto-create empty directories on the host that shadow real content on restart.
 - Runtime data MUST use Docker named volumes. Never write to the project directory.
 
-### 3.8 Dependencies
+### 3.9 Dependencies
 
 - **Runtime deps** (`requirements.txt` per service): exact pins (`==`).
 - **Dev deps** (`requirements-dev.txt`): major-version constraints (`>=X,<X+1`).
 
-### 3.9 Model Naming Convention
+### 3.10 Model Naming Convention
 
 All public-facing Pydantic models follow `{Action}{Resource}{InterfaceType}`:
 
@@ -1520,14 +1528,14 @@ jobs:
         with: { python-version: "3.11" }
       - run: pip install -r requirements-dev.txt -r services/listener/requirements.txt -r services/poller/requirements.txt
       - name: Lint
-        run: make lint
+        run: make lint PYTHON=python3
       - name: Typecheck
-        run: make typecheck
+        run: make typecheck PYTHON=python3
       - name: Test
-        run: make test
+        run: make test PYTHON=python3
 ```
 
-Order: lint → typecheck → test (fastest to slowest, fail early).
+**`PYTHON=python3` is required** because the Makefile defaults to `.venv/bin/python3` (local dev), but CI installs deps into the system Python via `actions/setup-python`. Without the override, all `make` targets fail with "No such file or directory".
 
 ---
 
