@@ -206,7 +206,8 @@ def poll_once(
 
         if not new_fills:
             if replay and all_fills:
-                replay_fills = all_fills[:replay]
+                sorted_fills = sorted(all_fills, key=lambda f: f.timestamp, reverse=True)
+                replay_fills = sorted_fills[:replay]
                 trades = aggregate_fills(replay_fills)
                 log.info("Replay mode: resending %d fill(s) as %d trade(s)", len(replay_fills), len(trades))
                 notify(notifiers or [], WebhookPayload(trades=trades, errors=parse_errors))

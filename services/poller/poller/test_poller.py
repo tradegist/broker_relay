@@ -408,6 +408,36 @@ class TestPollOnce:
     @patch("poller.aggregate_fills")
     @patch("poller.parse_fills")
     @patch("poller.fetch_flex_report")
+    def test_replay_selects_most_recent_fills(
+        self,
+        mock_fetch: MagicMock,
+        mock_parse: MagicMock,
+        mock_agg: MagicMock,
+        mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection,
+        meta_db: sqlite3.Connection,
+    ) -> None:
+        """replay=1 should pick the fill with the latest timestamp, not arbitrary."""
+        old_fill = _make_fill(execId="TX_OLD", timestamp="20240101;080000")
+        new_fill = _make_fill(execId="TX_NEW", timestamp="20250601;120000")
+        mark_processed_batch(dedup_db, ["TX_OLD", "TX_NEW"])
+
+        mock_fetch.return_value = "<xml/>"
+        mock_parse.return_value = ([old_fill, new_fill], [])
+        mock_agg.return_value = [_make_trade(execIds=["TX_NEW"])]
+
+        poll_once(dedup_db, meta_db, replay=1)
+
+        # aggregate_fills is called twice: once for all_fills → sample trade,
+        # then once for the replay slice. The replay call should get only TX_NEW.
+        replay_call_fills = mock_agg.call_args_list[-1][0][0]
+        assert len(replay_call_fills) == 1
+        assert replay_call_fills[0].execId == "TX_NEW"
+
+    @patch("poller.notify")
+    @patch("poller.aggregate_fills")
+    @patch("poller.parse_fills")
+    @patch("poller.fetch_flex_report")
     def test_multiple_trades_single_webhook(
         self,
         mock_fetch: MagicMock,

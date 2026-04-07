@@ -208,6 +208,7 @@ These are non-negotiable. Every rule below applies from the first commit.
 - **Always scope `unittest.mock.patch`.** Use `setUpModule()`/`tearDownModule()`, `self.addCleanup()`, `with patch():`, or `@patch()`. Never use bare `patcher.start()` without registering `.stop()`.
 - **No cross-test dependencies.** Every test must be self-contained.
 - **pytest** with `--import-mode=importlib`.
+- **E2E conftest fixtures must use `yield` with a context manager.** Never `return httpx.Client(...)` — the client leaks sockets. Use `with httpx.Client(...) as client: yield client`. Scope to `session`. Include a `_preflight_check` fixture (`scope="session"`, `autouse=True`) that hits `/health` and calls `pytest.exit()` if the stack is unreachable.
 
 ### 3.8 Docker
 
@@ -529,7 +530,7 @@ as a reliability fallback. Catches fills that the WebSocket missed.
 **Replay mode** (`replay > 0`):
 
 - Passes `start=None` to the exchange API (ignores watermark, fetches all recent)
-- Skips dedup entirely — takes the first N fills regardless
+- Sorts fills by timestamp descending and takes the most recent N
 - Sends webhook but does NOT mark fills as processed or update watermark
 - Use case: testing webhook delivery without waiting for new real trades
 
