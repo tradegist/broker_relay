@@ -145,6 +145,7 @@ These are non-negotiable. Every rule below applies from the first commit.
 
 - **No unused imports.** After writing or editing any Python file, verify every `import` is used. Remove unused ones.
 - **No `__all__`.** All imports are explicit (`from module import X`). `__all__` only controls star-imports, which we never use.
+- **No lazy imports inside functions.** All imports must be at the top of the file. Do not use `from X import Y` inside a function body unless there is a genuine circular import that cannot be resolved by restructuring. If an import is only needed for type annotations, use `TYPE_CHECKING`.
 - **Makefile must mirror CLI arguments.** When adding a new parameter to a `cli/` command, always add the corresponding `$(if $(VAR),--flag $(VAR))` to the Makefile target so `make <target> VAR=value` works.
 - **Update README.md when changing public interfaces.** When adding or modifying CLI commands, Makefile targets, API endpoints, or env vars, always update the README to reflect the change.
 - **Run `make lint` after every code change.** Ruff is the linter. Fix all errors before committing. Use `make lint FIX=1` to auto-fix safe issues.
@@ -167,6 +168,7 @@ These are non-negotiable. Every rule below applies from the first commit.
 - **No `# type: ignore` without justification.** Fix the root cause. If suppression is unavoidable, include a reason: `# type: ignore[attr-defined]  # kraken lib has no stubs`.
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)`. Use explicit keyword arguments or `model_copy(update=...)`.
 - **Prefer strict `Literal` types over bare `str`** on Pydantic models when a field has a known set of valid values.
+- **Use `TypedDict` for external API structures.** When consuming a third-party API (REST or WebSocket), define `TypedDict` classes in `services/shared/<exchange>_types.py` that mirror the official documented fields. Use these at system boundaries (parser function parameters, annotated variables) instead of bare `dict[str, Any]`. JSON-boundary functions (receiving raw WebSocket/REST JSON) accept `dict[str, Any]` and `cast()` to the TypedDict before calling typed internal parsers. The `raw: dict[str, Any]` field on models is exempt — it stores the original untyped payload.
 - **aiohttp middleware handler type** — do NOT use `web.RequestHandler` as the `handler` parameter type in `@web.middleware` functions. It is not callable under mypy strict. Use `Callable[[web.Request], Awaitable[web.StreamResponse]]` instead:
 
   ```python
@@ -259,11 +261,16 @@ kraken_relay/
 │       ├── resume.py            # Restore from snapshot
 │       └── sync.py              # rsync files + pre-deploy checks + restart containers
 ├── services/
+│   ├── shared/                  # Source of truth: shared models + utilities (library, no container)
+│   │   ├── __init__.py          # Fill, Trade, WebhookPayload, BuySell, Source, OrderType,
+│   │   │                        #   normalize_order_type(), SCHEMA_MODELS
+│   │   └── kraken_types.py      # TypedDicts for Kraken API (KrakenWsMessage, KrakenWsExecution,
+│   │                            #   KrakenRestTrade) — mirrors official Kraken API docs
 │   ├── listener/                # WebSocket listener service
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt     # Runtime deps (exact pins)
 │   │   ├── main.py              # Entrypoint (WS connection + HTTP health API)
-│   │   ├── models_listener.py   # Pydantic models (webhook payloads, Kraken types)
+│   │   ├── models_listener.py   # Re-export shim (imports from shared with `X as X`)
 │   │   ├── listener/            # Core WebSocket logic (package)
 │   │   │   ├── __init__.py      # KrakenWS class, reconnection loop
 │   │   │   ├── ws_parser.py     # Parse Kraken WS messages into Fill/Trade models
@@ -280,7 +287,7 @@ kraken_relay/
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt
 │   │   ├── main.py              # Entrypoint (polling loop + HTTP API)
-│   │   ├── models_poller.py     # Pydantic models (may share with listener)
+│   │   ├── models_poller.py     # Re-export shim (imports from shared with `X as X`)
 │   │   ├── poller/              # Core polling logic (package)
 │   │   │   ├── __init__.py      # poll_once(), watermark management
 │   │   │   ├── rest_client.py   # Kraken REST API client (authenticated)
@@ -311,15 +318,11 @@ kraken_relay/
 │       └── domains/             # Full site blocks (if project needs own domain)
 ├── types/                       # @tradegist/kraken-relay-types npm package
 │   ├── package.json
-│   ├── index.d.ts
-│   ├── listener/
-│   │   ├── index.d.ts
-│   │   ├── types.d.ts           # Generated from models_listener.py
-│   │   └── types.schema.json
-│   └── poller/
-│       ├── index.d.ts
-│       ├── types.d.ts           # Generated from models_poller.py
-│       └── types.schema.json
+│   ├── index.d.ts               # Barrel: exports Kraken namespace
+│   └── shared/                  # Single namespace — generated from services/shared/
+│       ├── index.d.ts           # Re-exports: BuySell, Fill, Trade, WebhookPayload
+│       ├── types.d.ts           # Generated from services/shared/__init__.py
+│       └── types.schema.json    # Intermediate JSON Schema
 └── terraform/
     ├── main.tf                  # Droplet + reserved IP + firewall
     ├── variables.tf             # All vars (with defaults + sensitive flags)
@@ -337,12 +340,15 @@ allow source directories. Each service that `COPY`s code must be allowed here.
 *
 
 # Allow service source code
+!services/shared/**
 !services/listener/**
 !services/poller/**
 !services/notifier/**
 !services/dedup/**
 
 # Re-exclude test files and caches from allowed dirs
+services/shared/**/test_*.py
+services/shared/**/__pycache__/
 services/listener/**/test_*.py
 services/listener/**/__pycache__/
 services/poller/**/test_*.py
@@ -401,6 +407,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY services/listener/listener/ ./listener/
 COPY services/listener/routes/ ./routes/
 COPY services/listener/main.py services/listener/models_listener.py ./
+COPY services/shared/ ./shared/
 COPY services/dedup/ ./dedup/
 COPY services/notifier/ ./notifier/
 
@@ -512,6 +519,7 @@ as a reliability fallback. Catches fills that the WebSocket missed.
 ```
 
 **Replay mode** (`replay > 0`):
+
 - Passes `start=None` to the exchange API (ignores watermark, fetches all recent)
 - Skips dedup entirely — takes the first N fills regardless
 - Sends webhook but does NOT mark fills as processed or update watermark
@@ -533,22 +541,57 @@ the watermark table independently.
 
 ## 7. Pydantic Models
 
-### `services/listener/models_listener.py`
+### Shared Module (`services/shared/`)
 
-> **Note:** The listener and poller may share the same webhook payload models.
-> If they diverge, create `models_poller.py` separately. If identical, symlink
-> or import from a shared location within the same service.
+All webhook payload models live in `services/shared/__init__.py` — the **single
+source of truth**. Service-specific files (`models_listener.py`,
+`models_poller.py`) are re-export shims so existing imports like
+`from models_listener import Fill` keep working. Shared models must be added to
+`shared` and re-exported with `X as X` for mypy strict re-export compatibility.
+Service-specific models (not shared across services) may be defined directly in
+the shim file with their own `SCHEMA_MODELS` for TypeScript generation.
+
+The shared module also exports reusable utility functions (e.g.
+`normalize_order_type()`) that are used by both parsers. This eliminates
+duplication — before the shared module, both the WS parser and REST poller had
+their own copy of the order type mapping.
+
+`services/shared/kraken_types.py` contains `TypedDict` definitions that mirror
+the official Kraken API documentation. These are used at system boundaries
+(parser function parameters, annotated test data) instead of `dict[str, Any]`.
+
+### Naming Conventions
+
+**Field names use camelCase** on all Pydantic models (`execId`, `orderId`,
+`orderType`, `fillCount`). This matches the JSON output format and the
+TypeScript types generated from the models. Snake_case is used only for Python
+internals (local variables, function names, private attributes).
+
+**String union types use lowercase with snake_case** — `OrderType` values are
+`"market"`, `"limit"`, `"stop"`, `"stop_limit"`, `"trailing_stop"`. `BuySell`
+enum values are `"buy"`, `"sell"`. `Source` values are `"ws_execution"`,
+`"rest_poll"`. This convention avoids ambiguity and maps cleanly to TypeScript
+string literal unions.
+
+### CommonFill Interface
+
+The `Fill` model defines a **common fill interface** shared across all exchange
+relay projects. The goal: webhook consumers see one consistent schema regardless
+of which exchange or data source produced the fill. Exchange-specific raw data
+is preserved in the `raw` field for consumers that need it.
 
 ```python
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
-Source = Literal["ws_execution", "rest_poll"]
+OrderType = Literal["market", "limit", "stop", "stop_limit", "trailing_stop"]
 
 class BuySell(str, Enum):
     BUY = "buy"
     SELL = "sell"
+
+Source = Literal["ws_execution", "rest_poll"]
 
 class Fill(BaseModel):
     """Individual execution from exchange."""
@@ -556,17 +599,36 @@ class Fill(BaseModel):
 
     execId: str                  # Exchange execution/trade ID (unique per fill)
     orderId: str                 # Exchange order ID
-    symbol: str                  # e.g. "XXBTZUSD"
-    side: BuySell
-    orderType: str               # "market", "limit", etc.
+    symbol: str                  # e.g. "XXBTZUSD", "BTC/USD"
+    side: BuySell                # "buy" or "sell" (lowercase enum)
+    orderType: OrderType | None = None  # Normalized order type, None if unmappable
     price: float
     volume: float
     cost: float
     fee: float
     timestamp: str               # ISO 8601 ("2025-04-07T10:30:00Z")
     source: Source               # Origin: "ws_execution" or "rest_poll"
-    # Add more fields as needed from the exchange's response
+    raw: dict[str, Any]          # Original exchange payload, unmodified
+```
 
+**Key design decisions:**
+
+- **`orderType` uses strict `Literal` with `None` fallback.** When the exchange
+  returns a value outside the known set, `orderType` is `None` — consumers
+  should check `raw` for the original value. The mapping is centralized in
+  `normalize_order_type()` in the shared module.
+- **`raw: dict[str, Any]` preserves the original exchange payload.** For WS
+  fills, this is the full execution dict. For REST fills, it's the trade dict
+  with the txid injected (since REST returns txid as the dict key, not a field).
+  The `raw` field is typed as `dict[str, Any]` (Python's equivalent of
+  `unknown`) — it is exempt from the TypedDict convention because its structure
+  varies by exchange and is intentionally untyped.
+- **`BuySell` is a `str` enum with lowercase values** — `"buy"`, `"sell"`.
+  Never uppercase. This maps cleanly to TypeScript `"buy" | "sell"`.
+
+### Trade Model
+
+```python
 class Trade(BaseModel):
     """Aggregated trade (one or more fills for the same order)."""
     model_config = ConfigDict(extra="forbid")
@@ -574,8 +636,8 @@ class Trade(BaseModel):
     orderId: str
     symbol: str
     side: BuySell
-    orderType: str
-    price: float                 # Volume-weighted average price
+    orderType: OrderType | None = None
+    price: float                 # Volume-weighted average price (VWAP)
     volume: float                # Total volume across fills
     cost: float                  # Total cost
     fee: float                   # Total fees
@@ -583,6 +645,7 @@ class Trade(BaseModel):
     execIds: list[str]           # All execution IDs in this trade
     timestamp: str               # ISO timestamp of latest fill
     source: Source               # Origin of the fills
+    raw: dict[str, Any]          # Raw payload from the first fill
 
 class WebhookPayload(BaseModel):
     """Payload sent to the target webhook URL."""
@@ -594,41 +657,125 @@ class WebhookPayload(BaseModel):
 SCHEMA_MODELS: list[type[BaseModel]] = [WebhookPayload, Trade, Fill]
 ```
 
+**`Trade.raw`** comes from the **first fill** of the aggregation. For
+multi-fill trades, symbol/order metadata is identical across fills for the same
+order, so the first fill's raw payload is representative.
+
 ### Field Normalization
 
 Kraken's WS v2 and REST APIs use different field names for the same data. The
-parsers normalize both into a unified `Fill` model. This table is the source of
-truth for the mapping — document it in the README for webhook consumers.
+parsers normalize both into the unified `Fill` model. Document this table in
+the README for webhook consumers.
 
-| Fill field  | Kraken WS v2 raw    | Kraken REST raw          | Notes                                      |
-| ----------- | ------------------- | ------------------------ | ------------------------------------------ |
-| `execId`    | `exec_id`           | dict key (`txid`)        | Renamed from both sources                  |
-| `orderId`   | `order_id`          | `ordertxid`              | Renamed from both sources                  |
-| `symbol`    | `symbol`            | `pair`                   | REST rename only                           |
-| `side`      | `side`              | `type`                   | REST rename only                           |
-| `orderType` | `order_type`        | `ordertype`              | Renamed from both sources                  |
-| `price`     | `last_price`        | `price`                  | WS rename only                             |
-| `volume`    | `last_qty`          | `vol`                    | Renamed from both sources                  |
-| `cost`      | `cost`              | `cost`                   | No rename                                  |
+| Fill field  | Kraken WS v2 raw    | Kraken REST raw          | Notes                                       |
+| ----------- | ------------------- | ------------------------ | ------------------------------------------- |
+| `execId`    | `exec_id`           | dict key (`txid`)        | Renamed from both sources                   |
+| `orderId`   | `order_id`          | `ordertxid`              | Renamed from both sources                   |
+| `symbol`    | `symbol`            | `pair`                   | REST rename only                            |
+| `side`      | `side`              | `type`                   | REST rename only                            |
+| `orderType` | `order_type`        | `ordertype`              | Renamed from both sources                   |
+| `price`     | `last_price`        | `price`                  | WS rename only                              |
+| `volume`    | `last_qty`          | `vol`                    | Renamed from both sources                   |
+| `cost`      | `cost`              | `cost`                   | No rename                                   |
 | `fee`       | `fees[].qty` (sum)  | `fee`                    | WS: array of `{asset, qty}` summed to float |
-| `timestamp` | `timestamp`         | `time` (unix float)      | REST: converted to ISO 8601 string         |
-| `source`    | `"ws_execution"`    | `"rest_poll"`            | Hardcoded per source                       |
+| `timestamp` | `timestamp`         | `time` (unix float)      | REST: converted to ISO 8601 string          |
+| `source`    | `"ws_execution"`    | `"rest_poll"`            | Hardcoded per source                        |
+| `raw`       | full execution dict | `{"txid": txid, **data}` | Original exchange payload, unmodified       |
 
-> **Why rename?** Kraken's WS v2 and REST APIs are internally inconsistent
-> (`exec_id` vs `txid`, `last_qty` vs `vol`, `pair` vs `symbol`). The parsers
-> normalize both into a single `Fill` model so webhook consumers see one
-> consistent schema regardless of which data source detected the fill.
+### Re-export Shims
 
-### `services/poller/models_poller.py`
-
-The poller re-exports shared types from the listener models (they are identical).
-The listener's `models_listener.py` is the single source of truth.
+`models_listener.py` and `models_poller.py` re-export from shared:
 
 ```python
-from models_listener import Fill, Trade, WebhookPayload
-
-SCHEMA_MODELS: list[type[BaseModel]] = [WebhookPayload, Trade, Fill]
+# models_listener.py
+from shared import BuySell as BuySell
+from shared import Fill as Fill
+from shared import OrderType as OrderType
+from shared import Source as Source
+from shared import Trade as Trade
+from shared import WebhookPayload as WebhookPayload
 ```
+
+The `X as X` pattern is required for mypy strict mode re-exports (the project
+forbids `__all__`). If a service needs its own models (not shared), define them
+directly in the shim file with a local `SCHEMA_MODELS`.
+
+### OrderType Mapping
+
+`OrderType` is a strict `Literal` union normalized via `normalize_order_type()`
+in the shared module. Each exchange project defines its own mapping:
+
+```python
+_ORDER_TYPE_MAP: dict[str, OrderType] = {
+    "market": "market",
+    "limit": "limit",
+    "stop-loss": "stop",
+    "stop-loss-limit": "stop_limit",
+    "trailing-stop": "trailing_stop",
+    "trailing-stop-limit": "trailing_stop",
+}
+
+def normalize_order_type(raw: str) -> OrderType | None:
+    return _ORDER_TYPE_MAP.get(raw)
+```
+
+| Kraken value          | Mapped `OrderType` |
+| --------------------- | ------------------ |
+| `market`              | `"market"`         |
+| `limit`               | `"limit"`          |
+| `stop-loss`           | `"stop"`           |
+| `stop-loss-limit`     | `"stop_limit"`     |
+| `trailing-stop`       | `"trailing_stop"`  |
+| `trailing-stop-limit` | `"trailing_stop"`  |
+
+### TypedDicts for External API Structures
+
+`services/shared/kraken_types.py` contains `TypedDict` classes that mirror the
+official Kraken API documentation. These provide type safety at the system
+boundary — parser functions accept typed parameters instead of `dict[str, Any]`:
+
+```python
+class KrakenWsExecution(TypedDict, total=False):
+    exec_type: str
+    exec_id: str
+    order_id: str
+    symbol: str
+    side: str
+    order_type: str
+    last_price: float
+    last_qty: float
+    cost: float
+    fees: list[KrakenWsFee]
+    timestamp: str
+    # ... additional fields
+
+class KrakenWsMessage(TypedDict, total=False):
+    channel: str
+    type: str
+    data: list[KrakenWsExecution]
+
+class KrakenRestTrade(TypedDict, total=False):
+    ordertxid: str
+    pair: str
+    time: float
+    type: str
+    ordertype: str
+    price: str
+    cost: str
+    fee: str
+    vol: str
+    # ... additional fields
+```
+
+All TypedDicts use `total=False` because many fields are conditional on context
+(e.g. `exec_type` determines which fields are present in WS messages). The
+parsers use `.get()` with defaults for safe access.
+
+**Boundary pattern:** JSON-boundary functions (e.g. `json.loads()` in
+`kraken_ws.py`) return untyped data. The caller passes it directly to the
+parser function which accepts the TypedDict type — mypy infers compatibility
+from `Any`. Internal parser functions (`_parse_fill`, `_parse_rest_trade`)
+accept the TypedDict and get full autocomplete + type checking on field access.
 
 ---
 
@@ -818,6 +965,7 @@ services:
       - "15010:5000"
     volumes:
       - ./services/listener:/app # bind-mount source for hot-reload
+      - ./services/shared:/opt/shared # shared models + utilities
       - ./services/notifier:/opt/notifier # cross-service module (see below)
       - ./services/dedup:/opt/dedup # cross-service module
     healthcheck:
@@ -847,6 +995,7 @@ services:
       - "15011:8000"
     volumes:
       - ./services/poller:/app
+      - ./services/shared:/opt/shared
       - ./services/notifier:/opt/notifier
       - ./services/dedup:/opt/dedup
     healthcheck:
@@ -880,7 +1029,7 @@ In tests, a bind mount like `./services/listener:/app` **replaces the entire
 
 ### Cross-service modules (the PYTHONPATH trick)
 
-Cross-service packages (`notifier`, `dedup`) are `COPY`'d into `/app/` by the
+Cross-service packages (`shared`, `notifier`, `dedup`) are `COPY`'d into `/app/` by the
 Dockerfile. But the bind mount `./services/listener:/app` wipes them. You need
 separate mounts for each:
 
@@ -889,10 +1038,10 @@ separate mounts for each:
 ```yaml
 volumes:
   - ./services/listener:/app
-  - ./services/notifier:/app/notifier # BROKEN: nested bind mount
+  - ./services/shared:/app/shared # BROKEN: nested bind mount
 ```
 
-Docker creates `services/listener/notifier/` on the host to back the nested
+Docker creates `services/listener/shared/` on the host to back the nested
 mount point. On `docker compose restart`, this empty host directory shadows the
 real content → `ImportError`.
 
@@ -901,10 +1050,11 @@ real content → `ImportError`.
 ```yaml
 volumes:
   - ./services/listener:/app
-  - ./services/notifier:/opt/notifier # separate path, no nesting
+  - ./services/shared:/opt/shared # separate path, no nesting
+  - ./services/notifier:/opt/notifier
   - ./services/dedup:/opt/dedup
 environment:
-  PYTHONPATH: /opt # Python finds notifier + dedup at /opt/*
+  PYTHONPATH: /opt # Python finds shared, notifier, dedup at /opt/*
 ```
 
 ### Port convention
@@ -960,6 +1110,7 @@ services:
       - "5000:5000"
     volumes:
       - ./services/listener:/app
+      - ./services/shared:/opt/shared
       - ./services/notifier:/opt/notifier
       - ./services/dedup:/opt/dedup
     environment:
@@ -970,6 +1121,7 @@ services:
       - "8000:8000"
     volumes:
       - ./services/poller:/app
+      - ./services/shared:/opt/shared
       - ./services/notifier:/opt/notifier
       - ./services/dedup:/opt/dedup
     environment:
@@ -1157,22 +1309,23 @@ poll:
 ### `MYPYPATH` for cross-service imports
 
 Each `make typecheck` invocation sets `MYPYPATH` so mypy can resolve imports
-across service boundaries. **When one service imports models from another** (e.g.
-the poller imports `models_listener` from the listener), both service dirs must
-be on `MYPYPATH`:
+across service boundaries. Every service that imports from `shared` needs
+`services/shared` on its `MYPYPATH`. The `services` directory is also included
+for the `notifier` package:
 
 ```makefile
 typecheck:
-	MYPYPATH=services/listener:services $(PYTHON) -m mypy services/listener/
-	MYPYPATH=services/poller:services/listener:services $(PYTHON) -m mypy services/poller/
+	MYPYPATH=services/shared:services $(PYTHON) -m mypy services/listener/
+	MYPYPATH=services/shared:services $(PYTHON) -m mypy services/poller/
 	MYPYPATH=services $(PYTHON) -m mypy services/notifier/
 	$(PYTHON) -m mypy services/dedup/
+	$(PYTHON) -m mypy services/shared/
 ```
 
-The poller needs `services/listener` on its path because `models_poller.py`
-re-exports from `models_listener`. Without it, mypy reports
-`"Skipping analyzing 'models_listener': module is installed, but missing
-library stubs or py.typed marker"`.
+Both listener and poller need `services/shared` because their shim files
+(`models_listener.py`, `models_poller.py`) re-export from `shared`. The
+`shared` module itself is checked independently — it has no external
+dependencies beyond stdlib + pydantic.
 
 ### `PYTHONPATH` for tests
 
@@ -1181,8 +1334,21 @@ pytest can resolve cross-service imports:
 
 ```makefile
 test:
-	PYTHONPATH=.:services/listener:services/poller:services $(PYTHON) -m pytest -v
+	PYTHONPATH=.:services/listener:services/poller:services/shared:services $(PYTHON) -m pytest -v
 ```
+
+### `types` target — single namespace
+
+The `types` target generates TypeScript types from the shared models only:
+
+```makefile
+types:
+	PYTHONPATH=services/shared $(PYTHON) schema_gen.py shared types/shared/types
+```
+
+This produces a single `Kraken` namespace. Service-specific shim models with
+their own `SCHEMA_MODELS` can add additional `schema_gen.py` invocations if
+needed.
 
 ---
 
@@ -1199,21 +1365,21 @@ warn_unused_configs = true
 explicit_package_bases = true
 
 [tool.pytest.ini_options]
-testpaths = ["services/listener", "services/poller", "services/notifier", "services/dedup"]
+testpaths = ["services/listener", "services/poller", "services/shared", "services/notifier", "services/dedup"]
 norecursedirs = ["tests/e2e"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-src = ["services/listener", "services/poller", "services/notifier", "services/dedup", "cli"]
+src = ["services/listener", "services/poller", "services/shared", "services/notifier", "services/dedup", "cli"]
 
 [tool.ruff.lint]
 select = ["F", "E", "W", "I", "UP", "B", "SIM", "RUF", "PGH003"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["listener", "poller", "notifier", "dedup", "routes", "models_listener", "models_poller"]
+known-first-party = ["listener", "poller", "shared", "notifier", "dedup", "routes", "models_listener", "models_poller"]
 ```
 
 ---
@@ -1277,7 +1443,7 @@ Build in this sequence. Run `make lint`, `make typecheck`, and `make test` after
 every step.
 
 1. **Scaffold** — repo init, `.gitignore`, `README.md`, `pyproject.toml`, `requirements-dev.txt`, `Makefile` (setup/lint/typecheck/test targets), empty `services/` dirs.
-2. **Models** — `models_listener.py` with `Fill`, `Trade`, `WebhookPayload`, `BuySell`. Write tests.
+2. **Shared models** — `services/shared/__init__.py` with `Fill`, `Trade`, `WebhookPayload`, `BuySell`, `OrderType`, `normalize_order_type()`. Create re-export shims (`models_listener.py`, `models_poller.py`). Write tests. Add `services/shared/kraken_types.py` with TypedDicts for Kraken API structures.
 3. **Dedup** — `services/dedup/` shared module (SQLite init, check, mark, prune). Write tests.
 4. **Notifier** — `services/notifier/` (base ABC, webhook backend, registry, loader). Copy from `ibkr_relay` and adapt. Write tests.
 5. **WS Parser** — `listener/ws_parser.py` (parse Kraken WS JSON into Fill models). Write tests with sample messages.
@@ -1290,7 +1456,7 @@ every step.
 12. **Terraform** — `main.tf`, `variables.tf`, `outputs.tf`, `cloud-init.sh`, `env.tftpl`.
 13. **Caddy** — `Caddyfile` (standalone), `kraken.caddy` (shared snippet).
 14. **Shared mode** — `docker-compose.shared.yml`, snippet validation, deploy integration.
-15. **TypeScript types** — `schema_gen.py`, `types/` package, `make types`.
+15. **TypeScript types** — `schema_gen.py`, `types/` package with single `Kraken` namespace, `make types`.
 16. **E2E tests** — against a real Kraken account with API keys (paper/small balance).
 17. **CI** — GitHub Actions workflow.
 
