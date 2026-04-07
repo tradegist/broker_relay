@@ -280,17 +280,38 @@ services/notifier/
 - **Adding a new backend** — create `services/notifier/<name>.py` with a class extending `BaseNotifier`, add it to `REGISTRY` in `__init__.py`.
 - **The poller calls `notify(notifiers, payload)`** — notifiers are loaded once at startup and passed through to `poll_once()`. The poller has no direct knowledge of webhook delivery mechanics.
 
+## Dedup Structure
+
+The `services/dedup/` package is a **standalone library** (no container, no Dockerfile). It provides SQLite dedup logic used by both the poller and the remote-client listener.
+
+```
+services/dedup/
+  __init__.py              # init_db(), is_processed(), mark_processed(), get_processed_ids(), mark_processed_batch(), prune()
+  test_dedup.py            # Tests for dedup module
+```
+
+- **`init_db(db_path)`** creates the `processed_fills` table and returns a `sqlite3.Connection`.
+- **`is_processed(conn, exec_id)`** — single-ID check (used by listener).
+- **`get_processed_ids(conn, exec_ids)`** — batch check (used by poller).
+- **`mark_processed(conn, exec_id)`** — single-ID mark (used by listener).
+- **`mark_processed_batch(conn, exec_ids)`** — batch mark (used by poller).
+- **`prune(conn, days=30)`** — delete old entries.
+- **Shared dedup DB** — both services read/write the same `fills.db` at `DEDUP_DB_PATH` (default `/data/dedup/fills.db`) on a `dedup-data` Docker named volume. SQLite WAL mode + `timeout=5.0` enables safe concurrent access.
+- **Dedup key priority** — `ibExecId → transactionId → tradeID` (via `_dedup_id()` in `models_poller.py`). `ibExecId` is preferred because it is the common identifier between Flex XML fills and ib_async execution events.
+- The poller has a separate metadata DB at `META_DB_PATH` (default `/data/meta.db`) on a `poller-data` volume for the timestamp watermark. The poller's `init_dedup_db()` wraps `dedup.init_db()`; `init_meta_db()` manages the metadata table independently.
+
 ## Listener (Real-Time Trade Events)
 
 The listener is an **opt-in** feature (`LISTENER_ENABLED` env var) that subscribes to ib_async trade events and fires webhooks immediately when orders fill.
 
 - **Lives in `client/listener.py`** inside the remote-client service — it is a `ListenerNamespace`, same pattern as `OrdersNamespace`.
-- **Subscribes to two events**: `execDetailsEvent` (fill without commission) and `commissionReportEvent` (fill with commission). Both fire per fill → two webhooks per fill.
+- **Subscribes to two events**: `execDetailsEvent` (fill without commission) and `commissionReportEvent` (fill with commission). `execDetailsEvent` always fires immediately (no dedup, no debounce). `commissionReportEvent` is deduplicated by `execId` via the shared `services/dedup/` module — duplicates after reconnect are skipped.
 - **Event subscriptions survive reconnects** — ib_async creates events in `__init__`, not in `connectAsync()`.
-- **Maps ib_async objects to the poller's `Trade` model** via `_map_to_trade()`. Since events provide different fields than Flex XML, some Trade fields are empty/zero (e.g. `tradeDate`, `tradeMoney`, `proceeds`). Key fields (`symbol`, `buySell`, `quantity`, `price`, `orderId`, `ibExecId`, `commission`, `dateTime`) are always populated.
+- **Maps ib_async objects to `Fill`** via `_map_to_fill()`. A helper `_fill_to_trade()` wraps a single `Fill` in a 1-fill `Trade` for immediate dispatch. When debouncing, fills are aggregated into multi-fill `Trade` objects via `aggregate_fills()`.
 - **The `source` field** on `Trade` distinguishes origin: `"flex"`, `"execDetailsEvent"`, or `"commissionReportEvent"`.
-- **No cross-service dedup** — the listener and poller fire independently. Consumers use `source` or `ibExecId` to deduplicate.
-- **No buffering** — each event fires a webhook immediately.
+- **Shared dedup DB** — the listener uses the same `dedup-data` volume and `DEDUP_DB_PATH` as the poller. Both services read/write `fills.db` concurrently (SQLite WAL + `timeout=5.0`). This means a fill processed by the listener is automatically skipped by the next poll cycle, and vice versa.
+- **Debounce** — controlled by `LISTENER_EVENT_DEBOUNCE_TIME` env var (milliseconds, default `0` = disabled). When enabled, `commissionReportEvent` fills are buffered per `orderId` in `_pending`. Each new fill resets the debounce timer (`asyncio.get_event_loop().call_later`). When the timer fires, `_flush()` does batch dedup → `aggregate_fills()` → `mark_processed_batch()` → dispatch. This aggregates rapid partial fills into a single webhook per order.
+- **Prune** — the listener prunes the dedup DB at startup and every 24 hours via `_schedule_prune()` → `_run_scheduled_prune()` → reschedule cycle using `call_later`. 30-day retention.
 - **Async dispatch** — `asyncio.ensure_future(asyncio.to_thread(notify, ...))` fire-and-forget. The `notify()` function uses synchronous `httpx.post`, so it runs in a thread to avoid blocking the ib_async event loop.
 - **Side mapping**: `"BOT"` → `BuySell.BUY`, `"SLD"` → `BuySell.SELL`.
 - **UNSET sentinel**: ib_async uses `1.7976931348623157e308` for unset floats — the listener treats this as `0.0`.
@@ -448,6 +469,7 @@ services/               # Business-logic services (user-facing features)
   poller/               # Flex poller service (see Poller Structure above)
     models_poller.py    # Pydantic models: Fill, Trade, WebhookPayload, BuySell, Source
   notifier/             # Pluggable notification backends (library, no container)
+  dedup/                # Shared SQLite dedup library (library, no container)
 infra/                  # Infrastructure backbone (no business logic)
   caddy/Caddyfile       # Reverse proxy config (uses env vars for domains)
   caddy/sites/          # Route snippets imported inside {$SITE_DOMAIN}

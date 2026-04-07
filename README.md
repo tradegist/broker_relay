@@ -327,6 +327,8 @@ All configuration is via environment variables in `.env`:
 | `REMOTE_CLIENT_ENABLED` | No       | `true`             | Set to `false` to disable ib-gateway, novnc, remote-client, and gateway-controller (poller-only mode) |
 | `DROPLET_SIZE`          | No       | —                  | Override droplet size slug (e.g. `s-1vcpu-512mb`). Ignores `JAVA_HEAP_SIZE` when set                  |
 | `POLL_INTERVAL_SECONDS` | No       | `600`              | Flex poll interval (seconds)                                                                          |
+| `LISTENER_ENABLED`      | No       | —                  | Set to any non-empty value to enable real-time trade event listener                                   |
+| `LISTENER_EVENT_DEBOUNCE_TIME` | No | `0`               | Debounce window in ms for `commissionReportEvent` fills. `0` = immediate dispatch                     |
 | `TIME_ZONE`             | No       | `America/New_York` | Timezone (tz database format)                                                                         |
 
 ## Webhook Payload
@@ -599,6 +601,8 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │       ├── __init__.py            # Registry, load_notifiers(), validate_notifier_env(), notify()
 │       ├── base.py                # BaseNotifier ABC
 │       └── webhook.py             # WebhookNotifier: HMAC-SHA256 signed HTTP POST
+│   └── dedup/                     # Shared SQLite dedup library (library, no container)
+│       └── __init__.py            # init_db(), is_processed(), mark_processed(), get_processed_ids(), prune()
 ├── infra/                         # Infrastructure backbone (no business logic)
 │   ├── caddy/
 │   │   ├── Caddyfile              # Reverse proxy config (VNC + Site domains)
@@ -888,7 +892,7 @@ The poller supports both **Activity Flex Queries** (`<Trade>` tags) and **Trade 
   - `execIds` is an array of `transactionId` values (one per fill), so you can trace back to individual executions
   - `fillCount` is the number of fills in the group
 
-- **Deduplication** uses `transactionId` as the primary key (falling back to `ibExecId` → `tradeID`). Processed IDs are stored in SQLite to prevent double-sending across poll cycles.
+- **Deduplication** uses `ibExecId` as the primary key (falling back to `transactionId` → `tradeID`). `ibExecId` is preferred because it is the common identifier between Flex XML fills and real-time ib_async execution events, enabling cross-service dedup. Processed IDs are stored in a shared SQLite database (WAL mode) that both the poller and listener read/write concurrently.
 
 - **Parse errors never break the runtime.** Malformed rows are skipped and reported in the `errors` array. Bad float values default to `0.0`.
 
@@ -905,7 +909,7 @@ IBKR uses different field names for the same identifiers across its APIs. This t
 | **Permanent order ID** | `permId`       | `ibOrderID`        | `orderID`               | Account-wide, survives reconnects. The only reliable cross-session order identifier. Exposed as `orderId` in this project's API. |
 | Session order ID       | `orderId`      | —                  | —                       | Client-scoped `int`, resets on reconnect. Not used in this project.                                                              |
 | Execution / fill ID    | `execId`       | `ibExecID`         | `execID`                | Per-fill unique ID. Format: `hex.hex.seq.seq`. Join key between real-time and Flex at the fill level.                            |
-| Transaction ID         | —              | `transactionId`    | —                       | Flex-only monotonic ID. Used as the primary dedup key in the poller.                                                             |
+| Transaction ID         | —              | `transactionId`    | —                       | Flex-only monotonic ID. Fallback dedup key when `ibExecId` is absent.                                |                                                             |
 | Trade ID               | —              | `tradeID`          | —                       | Flex reporting grouping key. No real-time equivalent.                                                                            |
 | Brokerage order ID     | —              | `brokerageOrderID` | —                       | IBKR internal routing ID.                                                                                                        |
 | Exchange order ID      | —              | `exchOrderId`      | —                       | ID assigned by the exchange.                                                                                                     |
@@ -929,7 +933,7 @@ When enabled, the remote-client subscribes to two ib_async events:
 - **`execDetailsEvent`** — fires when an execution occurs (fill price, quantity, exchange). Commission is not yet available.
 - **`commissionReportEvent`** — fires shortly after with commission and realized P&L.
 
-Each event produces a separate webhook with a single `Trade` object. The `source` field indicates the origin:
+Each event produces a webhook with `Trade` objects. The `source` field indicates the origin:
 
 | Source                  | Commission | Latency        |
 | ----------------------- | ---------- | -------------- |
@@ -937,7 +941,11 @@ Each event produces a separate webhook with a single `Trade` object. The `source
 | `commissionReportEvent` | Populated  | ~0.5s after    |
 | `flex`                  | Populated  | Minutes (poll) |
 
-Both events fire for every fill — consumers receive two webhooks per fill and can choose which to act on (e.g. use `execDetailsEvent` for instant notification, `commissionReportEvent` for final commission data).
+`execDetailsEvent` is always dispatched immediately (no dedup, no debounce). `commissionReportEvent` is deduplicated by `execId` via the shared `services/dedup/` SQLite module — duplicates after reconnect are skipped.
+
+When **debounce** is enabled (`LISTENER_EVENT_DEBOUNCE_TIME` > 0), `commissionReportEvent` fills are buffered per `orderId` and aggregated into a single webhook per order. Each new fill resets the debounce timer. This is useful for orders that produce rapid partial fills — instead of N separate webhooks, you get one aggregated trade after the fills settle.
+
+The listener also prunes the shared dedup DB at startup and every 24 hours (30-day retention).
 
 ### Enable
 
@@ -952,10 +960,14 @@ WEBHOOK_SECRET=your_hmac_secret_key
 
 The listener reuses the same notifier configuration as the poller (`NOTIFIERS`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, etc.).
 
-### No cross-service dedup
+### Dedup
 
-The listener and poller fire independently. If the Gateway is connected and `LISTENER_ENABLED=true`, the same trade may produce webhooks from both the listener (real-time) and the poller (next poll cycle). Consumers should use the `source` field to distinguish or deduplicate by `ibExecId`.
+Both the listener and poller share the same SQLite dedup database at `DEDUP_DB_PATH` (default `/data/dedup/fills.db`) on a `dedup-data` Docker named volume. SQLite WAL mode with `timeout=5.0` enables safe concurrent access from both containers.
+
+A fill processed by the listener is automatically skipped by the next poll cycle, and vice versa. The dedup key is `ibExecId` (the common identifier between Flex XML and ib_async events), falling back to `transactionId` → `tradeID`.
+
+The poller has a separate metadata DB at `META_DB_PATH` (default `/data/meta.db`) on a private `poller-data` volume for its timestamp watermark.
 
 ### Field mapping
 
-The listener maps ib_async event objects to the same `Trade` model used by the poller. Since the events provide a different set of fields than Flex XML, some Trade fields will be empty strings or `0.0` (e.g. `tradeDate`, `tradeMoney`, `proceeds`). The key fields (`symbol`, `buySell`, `quantity`, `price`, `orderId`, `ibExecId`, `commission`, `dateTime`) are always populated.
+The listener maps ib_async event objects to `Fill` via `_map_to_fill()`, then wraps them in `Trade` objects (via `_fill_to_trade()` for immediate dispatch, or `aggregate_fills()` when debouncing). Since the events provide a different set of fields than Flex XML, some Trade fields will be empty strings or `0.0` (e.g. `tradeDate`, `tradeMoney`, `proceeds`). The key fields (`symbol`, `buySell`, `quantity`, `price`, `orderId`, `ibExecId`, `commission`, `dateTime`) are always populated.
