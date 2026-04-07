@@ -9,7 +9,7 @@ import asyncio
 import logging
 import sqlite3
 
-from dedup import get_processed_ids, is_processed, mark_processed, mark_processed_batch, prune
+from dedup import get_processed_ids, is_processed, mark_processed_batch, prune
 from ib_async import IB
 from ib_async import Trade as IBTrade
 from ib_async.objects import CommissionReport
@@ -200,8 +200,7 @@ class ListenerNamespace:
             mapped.side.value, mapped.volume, mapped.symbol,
             mapped.fee, mapped.execId,
         )
-        mark_processed(self._db, mapped.execId)
-        self._dispatch(_fill_to_trade(mapped))
+        self._dispatch(_fill_to_trade(mapped), exec_ids=[mapped.execId])
 
     # ── Debounce logic ───────────────────────────────────────────────────
 
@@ -256,18 +255,27 @@ class ListenerNamespace:
             trade.fillCount, trade.volume, trade.price,
         )
 
-        # Mark as processed, then dispatch
-        mark_processed_batch(self._db, [f.execId for f in new_fills])
-        self._dispatch(trade)
+        self._dispatch(trade, exec_ids=[f.execId for f in new_fills])
 
     # ── Dispatch ─────────────────────────────────────────────────────────
 
-    def _dispatch(self, trade: Trade) -> None:
-        """Fire webhook in a background thread (non-blocking)."""
+    def _dispatch(self, trade: Trade, *, exec_ids: list[str] | None = None) -> None:
+        """Fire webhook in a background thread, then mark fills as processed.
+
+        Marking happens *after* notify() completes so a crash between
+        mark and dispatch cannot silently drop fills.
+        """
         from notifier import notify
 
         payload = WebhookPayload(trades=[trade], errors=[])
-        task = asyncio.ensure_future(asyncio.to_thread(notify, self._notifiers, payload))
+        db = self._db
+
+        def _send_and_mark() -> None:
+            notify(self._notifiers, payload)
+            if exec_ids:
+                mark_processed_batch(db, exec_ids)
+
+        task = asyncio.ensure_future(asyncio.to_thread(_send_and_mark))
         task.add_done_callback(self._on_dispatch_done)
 
     @staticmethod

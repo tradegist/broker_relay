@@ -131,11 +131,13 @@ services:
       WEBHOOK_HEADER_VALUE: ${WEBHOOK_HEADER_VALUE_2:-}
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS_2:-600}
       API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
-      DB_PATH: /data/poller.db
+      DEDUP_DB_PATH: /data/dedup/fills.db
+      META_DB_PATH: /data/meta/poller-2.db
     expose:
       - "8000"
     volumes:
-      - poller-2-data:/data
+      - dedup-data:/data/dedup
+      - poller-2-data:/data/meta
 
   gateway-controller:
     build: ./infra/gateway-controller

@@ -155,7 +155,7 @@ class TestFillToTrade:
 
 def _dedup_db() -> sqlite3.Connection:
     """In-memory dedup database for tests."""
-    conn = sqlite3.connect(":memory:")
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS processed_fills ("
         "  exec_id TEXT PRIMARY KEY,"

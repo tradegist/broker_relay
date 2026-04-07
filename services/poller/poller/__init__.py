@@ -70,6 +70,7 @@ def set_last_poll_ts(meta_conn: sqlite3.Connection, ts: str) -> None:
         "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_poll_ts', ?)",
         (ts,),
     )
+    meta_conn.commit()
 
 
 def prune_old(dedup_conn: sqlite3.Connection, days: int = 30) -> None:
