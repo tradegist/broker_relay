@@ -282,7 +282,7 @@ Webhook payload and order placement types are available as a TypeScript package 
 ```
 types/
   index.d.ts                 # Barrel: exports IbkrPoller, IbkrHttp namespaces
-  package.json               # @tradegist/ibkr-relay-types
+  package.json               # @tradegist/ibkr-types
   poller/
     index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
     types.d.ts               # Generated from services/poller/models_poller.py
@@ -296,7 +296,7 @@ types/
 Usage:
 
 ```typescript
-import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-relay-types";
+import { IbkrPoller, IbkrHttp } from "@tradegist/ibkr-types";
 
 const payload: IbkrPoller.WebhookPayload = ...;
 const order: IbkrHttp.PlaceOrderPayload = ...;
@@ -616,7 +616,7 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │       ├── Dockerfile
 │       ├── start-gateway.sh       # CGI script to start ib-gateway
 │       └── gateway-status.sh      # CGI script to check ib-gateway status
-└── types/                     # @tradegist/ibkr-relay-types npm package
+└── types/                     # @tradegist/ibkr-types npm package
     ├── index.d.ts             # Barrel: exports IbkrPoller, IbkrHttp namespaces
     ├── package.json
     ├── poller/                # IbkrPoller namespace
@@ -856,7 +856,7 @@ make logs S=ib-gateway
 - [x] Makefile CLI (`make deploy`, `make order`, etc.)
 - [x] Gateway management (browser Start Gateway button + `make gateway`)
 - [x] Unified Flex XML parsing (Activity + Trade Confirmation)
-- [x] TypeScript type definitions (`@tradegist/ibkr-relay-types`, not yet published)
+- [x] TypeScript type definitions (`@tradegist/ibkr-types`, not yet published)
 - [x] E2E test infrastructure (Docker-based, paper account)
 - [x] Real-time listener (opt-in, `LISTENER_ENABLED`)
 - [x] Optional poller disable (`POLLER_ENABLED=false`)
