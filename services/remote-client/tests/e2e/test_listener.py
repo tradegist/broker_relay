@@ -11,17 +11,30 @@ execution events are emitted.  Tests skip gracefully in that case.
 
 import hashlib
 import hmac
-import json
 import threading
 import time
 from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypedDict
 
 import httpx
 import pytest
 
+from shared import WebhookPayloadTrades
+
 WEBHOOK_SECRET = "test-webhook-secret"
+
+
+# ── Typed webhook entry ──────────────────────────────────────────────────
+
+
+class _WebhookEntry(TypedDict):
+    """Single entry collected by the webhook receiver."""
+
+    body: WebhookPayloadTrades
+    signature: str
+    raw: bytes
+    received_at: float
 
 
 # ── Webhook receiver ────────────────────────────────────────────────────
@@ -30,17 +43,18 @@ WEBHOOK_SECRET = "test-webhook-secret"
 class _WebhookHandler(BaseHTTPRequestHandler):
     """Collects incoming webhook payloads into a shared list."""
 
-    received: ClassVar[list[dict[str, Any]]] = []
+    received: ClassVar[list[_WebhookEntry]] = []
 
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
-        self.received.append({
-            "body": json.loads(body),
+        entry: _WebhookEntry = {
+            "body": WebhookPayloadTrades.model_validate_json(body),
             "signature": self.headers.get("X-Signature-256", ""),
             "raw": body,
             "received_at": time.monotonic(),
-        })
+        }
+        self.received.append(entry)
         self.send_response(200)
         self.end_headers()
 
@@ -49,7 +63,7 @@ class _WebhookHandler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture(scope="module")
-def webhook_payloads() -> Generator[list[dict[str, Any]]]:
+def webhook_payloads() -> Generator[list[_WebhookEntry]]:
     """Start a webhook receiver on port 19999 for the duration of this module."""
     _WebhookHandler.received = []
     server = HTTPServer(("0.0.0.0", 19999), _WebhookHandler)
@@ -76,7 +90,7 @@ def _wait_for_fill(api: httpx.Client, order_id: int, timeout: float = 10) -> boo
 
 
 def test_listener_fires_on_market_order(
-    api: httpx.Client, webhook_payloads: list[dict[str, Any]],
+    api: httpx.Client, webhook_payloads: list[_WebhookEntry],
 ) -> None:
     """Place MKT BUY → expect execDetailsEvent + commissionReportEvent webhooks.
 
@@ -111,23 +125,21 @@ def test_listener_fires_on_market_order(
     # Verify payload structure
     for entry in new:
         payload = entry["body"]
-        assert "trades" in payload
-        assert "errors" in payload
-        assert len(payload["trades"]) == 1
+        assert len(payload.data) == 1
 
-        trade = payload["trades"][0]
-        assert trade["source"] in ("execDetailsEvent", "commissionReportEvent")
-        assert trade["symbol"] == "AAPL"
-        assert trade["side"] == "buy"
+        trade = payload.data[0]
+        assert trade.source in ("execDetailsEvent", "commissionReportEvent")
+        assert trade.symbol == "AAPL"
+        assert trade.side == "buy"
 
     # Both event types must be present
-    sources = {e["body"]["trades"][0]["source"] for e in new}
+    sources = {e["body"].data[0].source for e in new}
     assert "execDetailsEvent" in sources, f"Missing execDetailsEvent, got: {sources}"
     assert "commissionReportEvent" in sources, f"Missing commissionReportEvent, got: {sources}"
 
 
 def test_webhook_hmac_signature(
-    webhook_payloads: list[dict[str, Any]],
+    webhook_payloads: list[_WebhookEntry],
 ) -> None:
     """Verify all received webhooks have valid HMAC-SHA256 signatures."""
     if len(webhook_payloads) == 0:
@@ -143,23 +155,23 @@ def test_webhook_hmac_signature(
 
 
 def test_commission_report_has_commission(
-    webhook_payloads: list[dict[str, Any]],
+    webhook_payloads: list[_WebhookEntry],
 ) -> None:
     """The commissionReportEvent webhook should include fee > 0."""
     commission_entries = [
         e for e in webhook_payloads
-        if e["body"]["trades"][0]["source"] == "commissionReportEvent"
+        if e["body"].data[0].source == "commissionReportEvent"
     ]
     if len(commission_entries) == 0:
         pytest.skip("No commissionReportEvent webhooks received (market likely closed)")
 
     for entry in commission_entries:
-        trade = entry["body"]["trades"][0]
-        assert trade["fee"] > 0, f"Expected fee > 0, got {trade['fee']}"
+        trade = entry["body"].data[0]
+        assert trade.fee > 0, f"Expected fee > 0, got {trade.fee}"
 
 
 def test_debounce_path_fires_webhook(
-    api: httpx.Client, webhook_payloads: list[dict[str, Any]],
+    api: httpx.Client, webhook_payloads: list[_WebhookEntry],
 ) -> None:
     """With LISTENER_EVENT_DEBOUNCE_TIME=2000, commissionReportEvent goes through
     the debounce path: enqueue → timer → flush → aggregate → webhook.
@@ -188,8 +200,8 @@ def test_debounce_path_fires_webhook(
     while time.monotonic() < deadline:
         exec_events = [
             e for e in webhook_payloads[baseline:]
-            if e["body"]["trades"][0]["source"] == "execDetailsEvent"
-            and str(e["body"]["trades"][0]["orderId"]) == str(order_id)
+            if e["body"].data[0].source == "execDetailsEvent"
+            and str(e["body"].data[0].orderId) == str(order_id)
         ]
         if exec_events:
             break
@@ -203,9 +215,9 @@ def test_debounce_path_fires_webhook(
     commission_event = None
     while time.monotonic() < deadline:
         for e in webhook_payloads[baseline:]:
-            t = e["body"]["trades"][0]
-            if (t["source"] == "commissionReportEvent"
-                    and str(t["orderId"]) == str(order_id)):
+            t = e["body"].data[0]
+            if (t.source == "commissionReportEvent"
+                    and str(t.orderId) == str(order_id)):
                 commission_event = e
                 break
         if commission_event:
@@ -215,14 +227,11 @@ def test_debounce_path_fires_webhook(
     assert commission_event is not None, "commissionReportEvent webhook never arrived"
 
     # The debounce path produces aggregated fields
-    trade = commission_event["body"]["trades"][0]
-    assert "execIds" in trade, "Debounced webhook missing execIds"
-    assert isinstance(trade["execIds"], list)
-    assert len(trade["execIds"]) >= 1
-    assert "fillCount" in trade
-    assert trade["fillCount"] >= 1
-    assert trade["symbol"] == "AAPL"
-    assert trade["side"] == "buy"
+    trade = commission_event["body"].data[0]
+    assert len(trade.execIds) >= 1
+    assert trade.fillCount >= 1
+    assert trade.symbol == "AAPL"
+    assert trade.side == "buy"
 
     # Measure the gap between execDetailsEvent and commissionReportEvent arrival
     # times. The /ibkr/order API blocks until IB fills the order, so t0-based

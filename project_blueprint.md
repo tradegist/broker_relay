@@ -216,6 +216,7 @@ These are non-negotiable. Every rule below applies from the first commit.
 - **No cross-test dependencies.** Every test must be self-contained.
 - **pytest** with `--import-mode=importlib`.
 - **E2E conftest fixtures must use `yield` with a context manager.** Never `return httpx.Client(...)` — the client leaks sockets. Use `with httpx.Client(...) as client: yield client`. Scope to `session`. Include a `_preflight_check` fixture (`scope="session"`, `autouse=True`) that hits `/health` and calls `pytest.exit()` if the stack is unreachable.
+- **E2E tests must use real Pydantic models, not `dict[str, Any]`.** When an E2E test receives a webhook payload or API response that matches a Pydantic model, parse it with `Model.model_validate_json(body)` (or `Model.model_validate(data)`) and access fields via attributes (`.data`, `.errors`), never via dict keys (`["data"]`). This ensures `make typecheck` catches field renames and typos at type-check time instead of at runtime. Never hand-roll TypedDicts that duplicate Pydantic model fields.
 
 ### 3.9 Docker
 

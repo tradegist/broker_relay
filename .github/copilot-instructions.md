@@ -215,6 +215,7 @@ The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validate
   - Never use bare `_patcher.start()` without registering a `.stop()`.
 - **No cross-test dependencies.** Every test must be self-contained — it must not rely on state created by a previous test (e.g. a position opened by an earlier buy test). Pytest does not guarantee execution order, and tests may run selectively or in parallel. If a test needs preconditions, create them within the test itself or via an explicit fixture.
 - **E2E conftest fixtures must use `yield` with a context manager.** Never `return httpx.Client(...)` — the client is never closed and leaks sockets. Use `with httpx.Client(...) as client: yield client` instead. Scope to `session` (one client per test run). Every E2E `conftest.py` must also include a `_preflight_check` fixture (`scope="session"`, `autouse=True`) that hits `/health` and calls `pytest.exit()` if the stack is unreachable.
+- **E2E tests must use real Pydantic models, not `dict[str, Any]`.** When an E2E test receives a webhook payload or API response that matches a Pydantic model, parse it with `Model.model_validate_json(body)` (or `Model.model_validate(data)`) and access fields via attributes (`.data`, `.errors`), never via dict keys (`["data"]`). This ensures `make typecheck` catches field renames and typos at type-check time instead of at runtime. Never hand-roll TypedDicts that duplicate Pydantic model fields.
 
 ### Routes Package Names
 
