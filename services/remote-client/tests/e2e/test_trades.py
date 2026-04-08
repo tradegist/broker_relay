@@ -55,7 +55,10 @@ def _wait_for_trade(
 
 
 def test_market_buy_appears_in_trades(api: httpx.Client) -> None:
-    """Place MKT BUY → verify it appears in trades with fills."""
+    """Place MKT BUY → verify it appears in trades with fills.
+
+    Skips when the market is closed (orders go Inactive instead of filling).
+    """
     order_resp = api.post(
         "/ibkr/order",
         json={
@@ -67,6 +70,8 @@ def test_market_buy_appears_in_trades(api: httpx.Client) -> None:
     order_id = order_resp.json()["orderId"]
 
     trade = _wait_for_trade(api, order_id)
+    if trade["status"] == "Inactive":
+        pytest.skip("Market appears closed — MKT order went Inactive")
     assert trade["action"] == "BUY"
     assert trade["symbol"] == "AAPL"
     assert trade["orderType"] == "MKT"
@@ -81,7 +86,10 @@ def test_market_buy_appears_in_trades(api: httpx.Client) -> None:
 
 
 def test_limit_buy_below_market(api: httpx.Client) -> None:
-    """LMT BUY at $1 should be accepted but not fill."""
+    """LMT BUY at $1 should be accepted but not fill.
+
+    Skips when the market is closed (orders go Inactive instead of Submitted).
+    """
     order_resp = api.post(
         "/ibkr/order",
         json={
@@ -101,6 +109,8 @@ def test_limit_buy_below_market(api: httpx.Client) -> None:
     order_id = data["orderId"]
 
     trade = _wait_for_trade(api, order_id)
+    if trade["status"] == "Inactive":
+        pytest.skip("Market appears closed — LMT order went Inactive")
     assert trade["lmtPrice"] == 1.0
     # Should NOT have filled at $1
     assert trade["status"] in ("Submitted", "PreSubmitted")

@@ -124,11 +124,13 @@ class ListenerNamespace:
         db: sqlite3.Connection,
         *,
         debounce_ms: int = 0,
+        exec_events_enabled: bool = False,
     ) -> None:
         self._ib = ib
         self._notifiers = notifiers
         self._db = db
         self._debounce_s = debounce_ms / 1000.0
+        self._exec_events_enabled = exec_events_enabled
 
         # Debounce state (only used when debounce_ms > 0)
         # _pending: orderId → {execId → Fill} — dict prevents duplicates
@@ -168,6 +170,8 @@ class ListenerNamespace:
     # ── execDetailsEvent (always immediate, no dedup) ────────────────────
 
     def _on_exec_details(self, trade: IBTrade, fill: IBFill) -> None:
+        if not self._exec_events_enabled:
+            return
         try:
             mapped = _map_to_fill(trade, fill, "execDetailsEvent")
         except Exception:

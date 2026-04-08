@@ -193,9 +193,30 @@ class TestListenerStart:
 
 class TestListenerDispatchImmediate:
     @patch("client.listener.notify")
-    def test_exec_details_dispatches(self, mock_notify: MagicMock) -> None:
+    def test_exec_details_skipped_when_disabled(self, mock_notify: MagicMock) -> None:
+        """Default: exec_events_enabled=False silences execDetailsEvent."""
         ib = MagicMock()
         ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db())
+
+        ib_trade = _mock_ib_trade(symbol="AAPL")
+        fill = _mock_fill()
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.call_soon(lambda: ns._on_exec_details(ib_trade, fill))
+            loop.run_until_complete(asyncio.sleep(0.2))
+        finally:
+            loop.close()
+
+        mock_notify.assert_not_called()
+
+    @patch("client.listener.notify")
+    def test_exec_details_dispatches_when_enabled(self, mock_notify: MagicMock) -> None:
+        ib = MagicMock()
+        ns = ListenerNamespace(
+            ib, notifiers=[MagicMock()], db=_dedup_db(),
+            exec_events_enabled=True,
+        )
 
         ib_trade = _mock_ib_trade(symbol="AAPL")
         fill = _mock_fill()
@@ -214,7 +235,8 @@ class TestListenerDispatchImmediate:
         assert payload.data[0].symbol == "AAPL"
 
     @patch("client.listener.notify")
-    def test_commission_report_dispatches(self, mock_notify: MagicMock) -> None:
+    def test_commission_report_unaffected_by_exec_flag(self, mock_notify: MagicMock) -> None:
+        """commissionReportEvent fires regardless of exec_events_enabled."""
         ib = MagicMock()
         ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db())
 
@@ -534,7 +556,10 @@ class TestDebounceExecDetailsNotDebounced:
     @patch("client.listener.notify")
     def test_exec_details_immediate(self, mock_notify: MagicMock) -> None:
         ib = MagicMock()
-        ns = ListenerNamespace(ib, notifiers=[MagicMock()], db=_dedup_db(), debounce_ms=500)
+        ns = ListenerNamespace(
+            ib, notifiers=[MagicMock()], db=_dedup_db(),
+            debounce_ms=500, exec_events_enabled=True,
+        )
 
         ib_trade = _mock_ib_trade(symbol="AAPL")
         fill = _mock_fill()

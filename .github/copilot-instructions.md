@@ -217,6 +217,7 @@ The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validate
 - **No cross-test dependencies.** Every test must be self-contained — it must not rely on state created by a previous test (e.g. a position opened by an earlier buy test). Pytest does not guarantee execution order, and tests may run selectively or in parallel. If a test needs preconditions, create them within the test itself or via an explicit fixture.
 - **E2E conftest fixtures must use `yield` with a context manager.** Never `return httpx.Client(...)` — the client is never closed and leaks sockets. Use `with httpx.Client(...) as client: yield client` instead. Scope to `session` (one client per test run). Every E2E `conftest.py` must also include a `_preflight_check` fixture (`scope="session"`, `autouse=True`) that hits `/health` and calls `pytest.exit()` if the stack is unreachable.
 - **E2E tests must use real Pydantic models, not `dict[str, Any]`.** When an E2E test receives a webhook payload or API response that matches a Pydantic model, parse it with `Model.model_validate_json(body)` (or `Model.model_validate(data)`) and access fields via attributes (`.data`, `.errors`), never via dict keys (`["data"]`). This ensures `make typecheck` catches field renames and typos at type-check time instead of at runtime. Never hand-roll TypedDicts that duplicate Pydantic model fields.
+- **E2E tests must be resilient to market hours.** The paper account connects to real exchanges — orders only fill when the market is open. Outside trading hours, MKT/LMT orders may go `Inactive` and execution events are never emitted. Every E2E test that places an order and asserts on fill status, trade details, or webhook delivery **must** check for the closed-market condition and call `pytest.skip("Market appears closed — ...")` instead of failing. The skip check must happen inline after observing the actual order/trade state (e.g. `if trade["status"] == "Inactive": pytest.skip(...)`) — do not use a pre-check fixture or decorator, because market state can only be determined by the order's actual behavior.
 
 ### Routes Package Names
 
@@ -337,7 +338,7 @@ services/dedup/
 The listener is an **opt-in** feature (`LISTENER_ENABLED` env var) that subscribes to ib_async trade events and fires webhooks immediately when orders fill.
 
 - **Lives in `client/listener.py`** inside the remote-client service — it is a `ListenerNamespace`, same pattern as `OrdersNamespace`.
-- **Subscribes to two events**: `execDetailsEvent` (fill without commission) and `commissionReportEvent` (fill with commission). `execDetailsEvent` always fires immediately (no dedup, no debounce). `commissionReportEvent` is deduplicated by `execId` via the shared `services/dedup/` module — duplicates after reconnect are skipped.
+- **Subscribes to two events**: `execDetailsEvent` (fill without commission) and `commissionReportEvent` (fill with commission). `execDetailsEvent` is gated by `LISTENER_EXEC_EVENTS_ENABLED` (default: disabled) — when disabled, the handler early-returns without mapping or dispatching. `commissionReportEvent` always fires and is deduplicated by `execId` via the shared `services/dedup/` module — duplicates after reconnect are skipped. Disabling exec events halves webhook volume (useful for platforms like Pipedream that charge per invocation).
 - **Event subscriptions survive reconnects** — ib_async creates events in `__init__`, not in `connectAsync()`.
 - **Maps ib_async objects to `Fill`** via `_map_to_fill()`. A helper `_fill_to_trade()` wraps a single `Fill` in a 1-fill `Trade` for immediate dispatch. When debouncing, fills are aggregated into multi-fill `Trade` objects via `aggregate_fills()`.
 - **The `source` field** on `Trade` distinguishes origin: `"flex"`, `"execDetailsEvent"`, or `"commissionReportEvent"`.
@@ -352,11 +353,11 @@ The listener is an **opt-in** feature (`LISTENER_ENABLED` env var) that subscrib
 
 This project has **three model locations** — a shared source of truth and two service-specific files:
 
-| File                                             | Domain                | Contains                                                                                                |
-| ------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------- |
+| File                                             | Domain                | Contains                                                                                                                        |
+| ------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `services/shared/__init__.py`                    | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `OrderType`, `Source`, `aggregate_fills()`, `_dedup_id()` |
-| `services/poller/models_poller.py`               | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                          |
-| `services/remote-client/models_remote_client.py` | Order API (inbound)   | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types           |
+| `services/poller/models_poller.py`               | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                                  |
+| `services/remote-client/models_remote_client.py` | Order API (inbound)   | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types                                   |
 
 - **`services/shared/__init__.py`** is the single source of truth for all webhook payload models. Both poller and remote-client import from it.
 - **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `services/poller/` and `services/remote-client/` are on `sys.path` (via the `.pth` file). Use `from shared import Fill` for shared types, `from models_poller import RunPollResponse` for poller-specific types.

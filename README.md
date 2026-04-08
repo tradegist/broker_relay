@@ -331,6 +331,7 @@ All configuration is via environment variables in `.env`:
 | `DROPLET_SIZE`                 | No       | —                  | Override droplet size slug (e.g. `s-1vcpu-512mb`). Ignores `JAVA_HEAP_SIZE` when set                  |
 | `POLL_INTERVAL_SECONDS`        | No       | `600`              | Flex poll interval (seconds)                                                                          |
 | `LISTENER_ENABLED`             | No       | —                  | Set to any non-empty value to enable real-time trade event listener                                   |
+| `LISTENER_EXEC_EVENTS_ENABLED` | No       | —                  | Enable `execDetailsEvent` webhooks (preliminary fill, no commission). Default: disabled               |
 | `LISTENER_EVENT_DEBOUNCE_TIME` | No       | `0`                | Debounce window in ms for `commissionReportEvent` fills. `0` = immediate dispatch                     |
 | `TIME_ZONE`                    | No       | `America/New_York` | Timezone (tz database format)                                                                         |
 
@@ -991,6 +992,12 @@ LISTENER_ENABLED=true
 NOTIFIERS=webhook
 TARGET_WEBHOOK_URL=https://example.com/webhook
 WEBHOOK_SECRET=your_hmac_secret_key
+```
+
+By default, only `commissionReportEvent` (confirmed fills with commission) fires webhooks. To also receive `execDetailsEvent` (preliminary fills without commission, lower latency but doubles webhook volume):
+
+```env
+LISTENER_EXEC_EVENTS_ENABLED=true
 ```
 
 The listener reuses the same notifier configuration as the poller (`NOTIFIERS`, `TARGET_WEBHOOK_URL`, `WEBHOOK_SECRET`, etc.).

@@ -43,11 +43,18 @@ async def amain() -> None:
         db_path = Path(DEDUP_DB_PATH)
         db = init_db(db_path)
         notifiers = load_notifiers()
+        exec_flag = os.environ.get("LISTENER_EXEC_EVENTS_ENABLED", "").lower()
+        exec_events_enabled = bool(exec_flag and exec_flag not in ("0", "false", "no"))
         client.listener = ListenerNamespace(
-            client.ib, notifiers, db, debounce_ms=DEBOUNCE_MS,
+            client.ib, notifiers, db,
+            debounce_ms=DEBOUNCE_MS,
+            exec_events_enabled=exec_events_enabled,
         )
         client.listener.start()
-        log.info("Listener enabled — subscribed to trade events")
+        log.info(
+            "Listener enabled — subscribed to trade events (exec_events=%s)",
+            exec_events_enabled,
+        )
 
     # Start watchdog to detect stale connections
     watchdog_task = asyncio.ensure_future(client.watchdog())
