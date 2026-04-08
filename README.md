@@ -605,7 +605,7 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │   │   │   ├── __init__.py        # IBClient class (connection management)
 │   │   │   ├── orders.py          # OrdersNamespace (place orders)
 │   │   │   └── listener.py        # ListenerNamespace (real-time trade events → webhooks)
-│   │   ├── routes/                # HTTP route handlers
+│   │   ├── rc_routes/             # HTTP route handlers
 │   │   │   ├── __init__.py        # Route orchestrator (create_routes)
 │   │   │   ├── middlewares.py     # Auth middleware (Bearer token)
 │   │   │   ├── order_place.py     # POST /ibkr/order
@@ -624,7 +624,7 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │       │   ├── flex_parser.py     # Flex XML parser (Activity + Trade Confirmation)
 │       │   ├── test_flex_parser.py # Tests for flex_parser
 │       │   └── test_poller.py     # Tests for poller core logic
-│       └── routes/                # HTTP API
+│       └── poller_routes/         # HTTP API
 │           ├── __init__.py        # Route orchestrator (create_routes, start_api_server)
 │           ├── middlewares.py     # Auth middleware (Bearer token)
 │           └── run.py             # POST /ibkr/poller/run handler

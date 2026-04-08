@@ -6,7 +6,7 @@ from unittest.mock import patch
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
 
-from routes.middlewares import auth_middleware
+from poller_routes.middlewares import auth_middleware
 
 
 async def _ok_handler(request: web.Request) -> web.Response:
@@ -19,47 +19,47 @@ class TestAuthMiddleware(AioHTTPTestCase):
     async def get_application(self) -> web.Application:
         app = web.Application(middlewares=[auth_middleware])
         app.router.add_get("/health", _ok_handler)
-        app.router.add_get("/ibkr/order", _ok_handler)
+        app.router.add_get("/ibkr/poller/run", _ok_handler)
         return app
 
-    @patch("routes.middlewares.API_TOKEN", "test-token")
+    @patch("poller_routes.middlewares.API_TOKEN", "test-token")
     async def test_health_bypasses_auth(self) -> None:
         resp = await self.client.request("GET", "/health")
         self.assertEqual(resp.status, 200)
 
-    @patch("routes.middlewares.API_TOKEN", "test-token")
+    @patch("poller_routes.middlewares.API_TOKEN", "test-token")
     async def test_missing_auth_header(self) -> None:
-        resp = await self.client.request("GET", "/ibkr/order")
+        resp = await self.client.request("GET", "/ibkr/poller/run")
         self.assertEqual(resp.status, 401)
 
-    @patch("routes.middlewares.API_TOKEN", "test-token")
+    @patch("poller_routes.middlewares.API_TOKEN", "test-token")
     async def test_invalid_token(self) -> None:
         resp = await self.client.request(
-            "GET", "/ibkr/order",
+            "GET", "/ibkr/poller/run",
             headers={"Authorization": "Bearer wrong-token"},
         )
         self.assertEqual(resp.status, 401)
 
-    @patch("routes.middlewares.API_TOKEN", "valid-token")
+    @patch("poller_routes.middlewares.API_TOKEN", "valid-token")
     async def test_valid_token(self) -> None:
         resp = await self.client.request(
-            "GET", "/ibkr/order",
+            "GET", "/ibkr/poller/run",
             headers={"Authorization": "Bearer valid-token"},
         )
         self.assertEqual(resp.status, 200)
 
-    @patch("routes.middlewares.API_TOKEN", "")
+    @patch("poller_routes.middlewares.API_TOKEN", "")
     async def test_empty_api_token_rejects_all(self) -> None:
         """Empty API_TOKEN must return 500, not silently accept empty Bearer."""
         resp = await self.client.request(
-            "GET", "/ibkr/order",
+            "GET", "/ibkr/poller/run",
             headers={"Authorization": "Bearer "},
         )
         self.assertEqual(resp.status, 500)
         body = await resp.json()
         self.assertIn("misconfigured", body["error"])
 
-    @patch("routes.middlewares.API_TOKEN", "")
+    @patch("poller_routes.middlewares.API_TOKEN", "")
     async def test_empty_api_token_health_still_works(self) -> None:
         """Health endpoint works even when API_TOKEN is empty."""
         resp = await self.client.request("GET", "/health")

@@ -7,9 +7,9 @@ import os
 from aiohttp import web
 
 from notifier.base import BaseNotifier
-from routes.health import handle_health
-from routes.middlewares import auth_middleware
-from routes.run import handle_run_poll
+from poller_routes.health import handle_health
+from poller_routes.middlewares import auth_middleware
+from poller_routes.run import handle_run_poll
 
 log = logging.getLogger("poller")
 

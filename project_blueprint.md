@@ -291,7 +291,7 @@ kraken_relay/
 │   │   │   ├── __init__.py      # KrakenWS class, reconnection loop
 │   │   │   ├── ws_parser.py     # Parse Kraken WS messages into Fill/Trade models
 │   │   │   └── test_ws_parser.py
-│   │   ├── routes/              # HTTP API
+│   │   ├── listener_routes/     # HTTP API
 │   │   │   ├── __init__.py      # create_routes()
 │   │   │   ├── middlewares.py   # Auth middleware (Bearer token)
 │   │   │   └── health.py        # GET /health
@@ -309,7 +309,7 @@ kraken_relay/
 │   │   │   ├── rest_client.py   # Kraken REST API client (authenticated)
 │   │   │   ├── test_rest_client.py
 │   │   │   └── test_poller.py
-│   │   ├── routes/
+│   │   ├── poller_routes/
 │   │   │   ├── __init__.py
 │   │   │   ├── middlewares.py
 │   │   │   └── run.py           # POST /kraken/poller/run (trigger immediate poll)
@@ -427,7 +427,7 @@ COPY services/listener/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY services/listener/listener/ ./listener/
-COPY services/listener/routes/ ./routes/
+COPY services/listener/listener_routes/ ./listener_routes/
 COPY services/listener/main.py services/listener/models_listener.py ./
 COPY services/shared/ ./shared/
 COPY services/dedup/ ./dedup/
@@ -464,17 +464,14 @@ kraken-listener:
 `kraken-listener` and `kraken-poller` only. Caddy is provided by the existing
 stack on the droplet.
 
-### Routes Package Name Collision (KNOWN ISSUE)
+### Routes Package Names
 
-Both `services/listener/routes/` and `services/poller/routes/` define a package named `routes` with a `create_routes()` function. Each service's `main.py` does `from routes import create_routes`. This works today because:
+Each service has a uniquely-named routes package to avoid `sys.modules` collisions when both services share `sys.path` (e.g. in pytest, mono-repo):
 
-- **Docker isolates at runtime** — each container only has its own service on `sys.path`.
-- **mypy uses separate invocations** per service with the correct service directory first in `MYPYPATH`.
-- **pytest** runs a single invocation but tests don't import `main.py` directly.
+- `services/listener/listener_routes/` — listener HTTP handlers (`from listener_routes import create_routes`)
+- `services/poller/poller_routes/` — poller HTTP handlers (`from poller_routes import create_routes`)
 
-**This will break if both services share the same `sys.path`** — e.g. merging relays into a mono-repo, combined test runs, or a single container. Python will resolve `from routes import create_routes` to whichever `routes/` appears first on `sys.path` (currently `services/listener/` per the `.pth` file).
-
-**When restructuring:** rename the packages to service-specific names (`listener_routes/`, `poller_routes/`) or nest them inside a parent package (`listener.routes`, `poller.routes`). Update `main.py` imports, `pyproject.toml` paths, Dockerfile `COPY` directives, and Docker Compose volume mounts accordingly.
+The same convention is used in `ibkr_relay` (`rc_routes/`, `poller_routes/`).
 
 ---
 
@@ -1576,7 +1573,7 @@ every step.
 4. **Notifier** — `services/notifier/` (base ABC, webhook backend, registry, loader). Copy from `ibkr_relay` and adapt. Write tests.
 5. **WS Parser** — `listener/ws_parser.py` (parse Kraken WS JSON into Fill models). Write tests with sample messages.
 6. **Listener core** — `listener/__init__.py` (WS connect, subscribe, reconnect loop, integration of parser + dedup + notifier).
-7. **HTTP health API** — `routes/health.py`, `routes/middlewares.py`.
+7. **HTTP health API** — `listener_routes/health.py`, `listener_routes/middlewares.py`.
 8. **Listener entrypoint** — `main.py` (start WS + HTTP concurrently).
 9. **Dockerfile + docker-compose.yml** — containerize listener.
 10. **Poller** — same sequence (REST client → parser → routes → main → Dockerfile). Dedup is already shared from step 3.

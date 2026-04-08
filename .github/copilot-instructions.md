@@ -103,7 +103,7 @@
 - **`REMOTE_CLIENT_ENABLED=false`** disables the entire gateway stack: `ib-gateway`, `novnc`, `remote-client`, and `gateway-controller`. Same mechanism as poller: `deploy.replicas: ${GATEWAY_REPLICAS:-1}` on all four services, mapped from `REMOTE_CLIENT_ENABLED` via `_compose_env()` and the Makefile `REMOTE_CLIENT` flag. Gateway-specific required env vars (`TWS_USERID`, `TWS_PASSWORD`, `VNC_SERVER_PASSWORD`) use `:-` defaults in compose and are validated by the CLI when the gateway is enabled.
 - **`.dockerignore` uses an allowlist** (`*` to exclude everything, then `!services/poller/**` to include the whole module). Tests, `__pycache__`, and the Dockerfile itself are re-excluded. This means adding new source files to `services/poller/` requires **no** `.dockerignore` or Dockerfile changes.
 - **When adding a new standalone module** (e.g. `services/notifier/`), you must add a `!services/<module>/**` entry to `.dockerignore` — the allowlist excludes everything by default. Also add exclusions for test files and `__pycache__` under the new module. Without this, `COPY services/<module>/ ./<module>/` in the Dockerfile will fail with a cryptic "not found" error.
-- The poller Dockerfile uses directory COPYs (`COPY services/poller/poller/ ./poller/`, `COPY services/poller/routes/ ./routes/`) so new files are picked up automatically.
+- The poller Dockerfile uses directory COPYs (`COPY services/poller/poller/ ./poller/`, `COPY services/poller/poller_routes/ ./poller_routes/`) so new files are picked up automatically.
 - **`poller-2` must mirror `poller` configuration.** The `poller-2` service is an optional second poller instance (behind the `poller2` profile) for a different IBKR account. Its `environment:` and `volumes:` blocks must stay in sync with `poller` — same env var names (with `_2` suffix for account-specific values), same `DEDUP_DB_PATH` pointing to the shared `dedup-data` volume, and its own `META_DB_PATH` (e.g. `/data/meta/poller-2.db`) on a dedicated `poller-2-data` volume. When modifying the `poller` service block, always check whether `poller-2` needs the same change.
 - **Never nest bind mounts in `docker-compose.test.yml`.** If a service mounts `./services/poller:/app` and you also need `services/notifier/` available, do NOT mount `./services/notifier:/app/notifier` (inside the first mount). Docker will auto-create an empty `services/poller/notifier/` directory on the host to back the nested mount point. On `docker compose restart`, this empty host directory shadows the real content, causing `ImportError`. Instead, mount the extra module at a separate path outside `/app` (e.g. `./services/notifier:/opt/notifier`) and add `PYTHONPATH: /opt` to the service's `environment:` block so Python can find it.
 
@@ -215,17 +215,14 @@ The deployment mode is controlled by `DEPLOY_MODE` in `.env` (required, validate
 - **No cross-test dependencies.** Every test must be self-contained — it must not rely on state created by a previous test (e.g. a position opened by an earlier buy test). Pytest does not guarantee execution order, and tests may run selectively or in parallel. If a test needs preconditions, create them within the test itself or via an explicit fixture.
 - **E2E conftest fixtures must use `yield` with a context manager.** Never `return httpx.Client(...)` — the client is never closed and leaks sockets. Use `with httpx.Client(...) as client: yield client` instead. Scope to `session` (one client per test run). Every E2E `conftest.py` must also include a `_preflight_check` fixture (`scope="session"`, `autouse=True`) that hits `/health` and calls `pytest.exit()` if the stack is unreachable.
 
-### Routes Package Name Collision (KNOWN ISSUE)
+### Routes Package Names
 
-Both `services/remote-client/routes/` and `services/poller/routes/` define a package named `routes` with a `create_routes()` function. Each service's `main.py` does `from routes import create_routes`. This works today because:
+Each service has a uniquely-named routes package to avoid `sys.modules` collisions when both services share `sys.path` (e.g. in pytest, mono-repo):
 
-- **Docker isolates at runtime** — each container only has its own service on `sys.path`.
-- **mypy uses separate invocations** per service with the correct service directory first in `MYPYPATH`.
-- **pytest** runs a single invocation but tests don't import `main.py` directly.
+- `services/remote-client/rc_routes/` — remote-client HTTP handlers (`from rc_routes import create_routes`)
+- `services/poller/poller_routes/` — poller HTTP handlers (`from poller_routes import create_routes`)
 
-**This will break if both services share the same `sys.path`** — e.g. merging into a mono-repo, combined test runs, or a single container. Python will resolve `from routes import create_routes` to whichever `routes/` appears first on `sys.path` (currently `services/remote-client/` per the `.pth` file).
-
-**When restructuring:** rename the packages to service-specific names (`remote_client_routes/`, `poller_routes/`) or nest them inside a parent package (`remote_client.routes`, `poller.routes`). Update `main.py` imports, `pyproject.toml` paths, Dockerfile `COPY` directives, and Docker Compose volume mounts accordingly. The same issue exists in `kraken_relay` (`services/listener/routes/` and `services/poller/routes/`).
+The same convention is used in `kraken_relay` (`listener_routes/`, `poller_routes/`).
 
 ## Remote Client Structure
 
@@ -243,7 +240,7 @@ services/remote-client/
     test_trades.py         # Tests for trades namespace
     listener.py            # ListenerNamespace: subscribe to trade events → webhooks
     test_listener.py       # Tests for listener namespace
-  routes/                  # HTTP route handlers
+  rc_routes/               # HTTP route handlers
     __init__.py            # Orchestrator: create_routes()
     middlewares.py         # Auth middleware (Bearer token)
     order_place.py         # POST /ibkr/order
@@ -277,7 +274,7 @@ services/poller/
     flex_parser.py         # XML parser (Activity Flex + Trade Confirmation)
     test_flex_parser.py    # Tests for flex_parser
     test_poller.py         # Tests for poller core logic
-  routes/                  # HTTP API
+  poller_routes/            # HTTP API
     __init__.py            # Orchestrator: create_routes(), start_api_server()
     middlewares.py         # Auth middleware (Bearer token)
     run.py                 # POST /ibkr/poller/run handler
@@ -290,7 +287,7 @@ services/poller/
 ```
 
 - **`services/poller/poller/`** contains core logic: SQLite dedup, Flex Web Service two-step fetch, and `poll_once()`. Notification delivery is delegated to the notifier package (see below).
-- **`services/poller/routes/`** contains the HTTP API for on-demand polls (`POST /ibkr/poller/run`).
+- **`services/poller/poller_routes/`** contains the HTTP API for on-demand polls (`POST /ibkr/poller/run`).
 - **`services/poller/models_poller.py`** is a re-export shim for shared models plus poller-specific API types (`RunPollResponse`, `HealthResponse`). The shared models (`Fill`, `Trade`, `WebhookPayload`) live in `services/shared/__init__.py`.
 
 ## Notifier Structure

@@ -14,7 +14,7 @@ from client import IBClient
 from client.listener import ListenerNamespace
 from dedup import init_db
 from notifier import load_notifiers
-from routes import create_routes
+from rc_routes import create_routes
 
 logging.basicConfig(
     level=logging.INFO,
