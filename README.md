@@ -300,7 +300,7 @@ Usage:
 ```typescript
 import { Ibkr, IbkrPoller, IbkrHttp } from "@tradegist/ibkr-relay-types";
 
-const payload: Ibkr.WebhookPayload = ...;   // shared webhook types
+const payload: Ibkr.WebhookPayload = ...;   // discriminated union (use this for consumers)
 const poll: IbkrPoller.RunPollResponse = ...; // poller-specific types
 const order: IbkrHttp.PlaceOrderPayload = ...; // order API types
 ```
@@ -376,7 +376,7 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
 }
 ```
 
-The envelope uses a discriminated union pattern — `relay` identifies the exchange and `type` identifies the event kind. Currently only `"trades"` exists; new event types (e.g. orders, positions) will be added as new variants.
+The envelope uses a discriminated union pattern — `relay` identifies the exchange and `type` identifies the event kind. Consumers should type their variables as `WebhookPayload` (the union). Currently the only variant is `WebhookPayloadTrades` (`type: "trades"`); new event types (e.g. orders, positions) will be added as new variants.
 
 ### CommonFill Contract
 
