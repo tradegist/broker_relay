@@ -104,6 +104,9 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 		if [ "$$pe" = "false" ] || [ "$$pe" = "0" ] || [ "$$pe" = "no" ] || [ -z "$$pe" ]; then \
 			export POLLER_REPLICAS=$${POLLER_REPLICAS:-0}; \
 		fi; \
+		if [ -n "$${DEBUG_WEBHOOK_PATH:-}" ]; then \
+			export DEBUG_REPLICAS=$${DEBUG_REPLICAS:-1}; \
+		fi; \
 	fi && \
 	$(LOCAL_COMPOSE) up -d --build
 	@echo ""

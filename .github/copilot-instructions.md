@@ -305,7 +305,7 @@ The `services/notifier/` package is a **standalone library** (no container, no D
 ```
 services/notifier/
   __init__.py              # Registry, load_notifiers(), validate_notifier_env(), notify()
-  base.py                  # BaseNotifier ABC (name, required_env_vars, send)
+  base.py                  # BaseNotifier ABC (name, required_env_vars, send, default env validation)
   webhook.py               # WebhookNotifier: HMAC-SHA256 signed HTTP POST
   test_notifier.py         # Tests for registry and loader
   test_webhook.py          # Tests for webhook backend
@@ -313,8 +313,9 @@ services/notifier/
 
 - **`NOTIFIERS` env var** controls which backends are active (comma-separated, e.g. `NOTIFIERS=webhook`). Empty = no notifications (dry-run).
 - **Suffix support** — `load_notifiers(suffix="_2")` reads from `TARGET_WEBHOOK_URL_2`, `WEBHOOK_SECRET_2`, etc. This powers `poller-2`.
-- **`validate_notifier_env()`** is called by `cli/__init__.py` during pre-deploy checks to ensure all required env vars are set for the configured backends.
-- **Adding a new backend** — create `services/notifier/<name>.py` with a class extending `BaseNotifier`, add it to `REGISTRY` in `__init__.py`.
+- **Validation belongs in each notifier's `__init__`, not the coordinator.** The coordinator (`__init__.py`) is a registry + dispatcher — it must not contain backend-specific validation logic (e.g. "skip `TARGET_WEBHOOK_URL` when `DEBUG_WEBHOOK_PATH` is set"). Each `BaseNotifier` subclass validates its own env vars in its constructor and raises `SystemExit(1)` on misconfiguration. The base class provides a default validation that checks `required_env_vars()`; subclasses with custom logic (like `WebhookNotifier`'s debug-path skip) override `__init__` entirely.
+- **`validate_notifier_env()`** is called by `cli/__init__.py` during pre-deploy checks. It instantiates each configured backend (triggering constructor validation) and converts `SystemExit` to a `die()` call for CLI-friendly output.
+- **Adding a new backend** — create `services/notifier/<name>.py` with a class extending `BaseNotifier`, add it to `REGISTRY` in `__init__.py`. The constructor must validate all required env vars.
 - **The poller calls `notify(notifiers, payload)`** — notifiers are loaded once at startup and passed through to `poll_once()`. The poller has no direct knowledge of webhook delivery mechanics.
 - **Debug webhook URL resolution** — `WebhookNotifier.__init__` calls `_resolve_webhook_url(suffix)`, a pure function in `webhook.py`. If `DEBUG_WEBHOOK_PATH` is set, the URL is overridden to `http://ibkr-debug:9000/debug/webhook/{path}` (container-to-container DNS). Otherwise, it reads `TARGET_WEBHOOK_URL{suffix}`. The service name (`ibkr-debug`) and port (`9000`) are hardcoded constants in `webhook.py`. No env var mutation occurs — the resolved URL is stored in `self._url`.
 

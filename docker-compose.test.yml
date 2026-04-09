@@ -69,6 +69,8 @@ services:
 
   ibkr-debug:
     restart: "no"
+    deploy:
+      replicas: 1
     environment:
       DEBUG_WEBHOOK_PATH: test-debug-path
     ports:

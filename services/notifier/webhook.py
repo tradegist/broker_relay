@@ -45,6 +45,24 @@ class WebhookNotifier(BaseNotifier):
         self._header_name = os.environ.get(f"WEBHOOK_HEADER_NAME{suffix}", "")
         self._header_value = os.environ.get(f"WEBHOOK_HEADER_VALUE{suffix}", "")
 
+        # Validate required env vars.  TARGET_WEBHOOK_URL is not needed when
+        # DEBUG_WEBHOOK_PATH is set — _resolve_webhook_url already resolved
+        # the URL to the debug inbox.
+        debug_active = bool(os.environ.get("DEBUG_WEBHOOK_PATH", "").strip())
+        missing = [
+            f"{var}{suffix}"
+            for var in self.required_env_vars()
+            if not os.environ.get(f"{var}{suffix}")
+            and not (debug_active and var == "TARGET_WEBHOOK_URL")
+        ]
+        if missing:
+            log.error(
+                "Notifier %r requires env vars: %s",
+                self.name,
+                ", ".join(missing),
+            )
+            raise SystemExit(1)
+
     @staticmethod
     def required_env_vars() -> list[str]:
         return ["TARGET_WEBHOOK_URL", "WEBHOOK_SECRET"]

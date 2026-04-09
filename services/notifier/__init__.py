@@ -16,7 +16,9 @@ REGISTRY: dict[str, type[BaseNotifier]] = {
 
 
 def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
-    """Read NOTIFIERS env var, validate config, return instantiated backends.
+    """Read NOTIFIERS env var, instantiate backends, return ready list.
+
+    Each backend validates its own configuration in ``__init__``.
 
     Args:
         suffix: Env var suffix for multi-instance support (e.g. "_2").
@@ -26,7 +28,7 @@ def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
         List of ready-to-use notifier instances. Empty list = dry-run mode.
 
     Raises:
-        SystemExit: If a notifier name is unknown or required env vars are missing.
+        SystemExit: If a notifier name is unknown or a backend rejects its config.
     """
     raw = os.environ.get(f"NOTIFIERS{suffix}", "").strip()
     if not raw:
@@ -43,19 +45,6 @@ def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
             log.error(
                 "Unknown notifier %r in NOTIFIERS%s. Available: %s",
                 name, suffix, ", ".join(REGISTRY),
-            )
-            raise SystemExit(1)
-
-        # Validate required env vars (with suffix)
-        missing = [
-            f"{var}{suffix}"
-            for var in cls.required_env_vars()
-            if not os.environ.get(f"{var}{suffix}")
-        ]
-        if missing:
-            log.error(
-                "Notifier %r requires env vars: %s",
-                name, ", ".join(missing),
             )
             raise SystemExit(1)
 
@@ -83,11 +72,11 @@ def _warn_orphaned_notifier_vars(suffix: str = "") -> None:
 
 
 def validate_notifier_env(suffix: str = "") -> bool:
-    """Check whether NOTIFIERS env vars are valid without instantiating.
+    """Check whether NOTIFIERS env vars are valid by instantiating backends.
 
-    Returns True if NOTIFIERS is set and all required vars are present.
+    Returns True if NOTIFIERS is set and all backends accept their config.
     Returns False if NOTIFIERS is empty (no notifiers configured).
-    Calls die() if partially configured (notifier named but missing vars).
+    Calls die() if a backend rejects its config (missing env vars).
 
     Designed for CLI pre-deploy validation (cli/_pre_sync_hook).
     """
@@ -105,14 +94,11 @@ def validate_notifier_env(suffix: str = "") -> bool:
         if cls is None:
             return False  # unknown notifier — let runtime error handle it
 
-        missing = [
-            f"{var}{suffix}"
-            for var in cls.required_env_vars()
-            if not os.environ.get(f"{var}{suffix}")
-        ]
-        if missing:
+        try:
+            cls(suffix=suffix)
+        except SystemExit:
             from cli.core import die  # lazy: cli/ not available in Docker containers
-            die(f"Notifier {name!r} partially configured. Missing: {', '.join(missing)}")
+            die(f"Notifier {name!r} partially configured — check env vars")
 
     return True
 
