@@ -31,7 +31,7 @@ def _resolve_webhook_url(suffix: str) -> str:
             url,
         )
         return url
-    return os.environ.get(f"TARGET_WEBHOOK_URL{suffix}", "")
+    return os.environ.get(f"TARGET_WEBHOOK_URL{suffix}", "").strip()
 
 
 class WebhookNotifier(BaseNotifier):
@@ -56,12 +56,9 @@ class WebhookNotifier(BaseNotifier):
             and not (debug_active and var == "TARGET_WEBHOOK_URL")
         ]
         if missing:
-            log.error(
-                "Notifier %r requires env vars: %s",
-                self.name,
-                ", ".join(missing),
-            )
-            raise SystemExit(1)
+            msg = f"Notifier {self.name!r} requires env vars: {', '.join(missing)}"
+            log.error("%s", msg)
+            raise SystemExit(msg)
 
     @staticmethod
     def required_env_vars() -> list[str]:

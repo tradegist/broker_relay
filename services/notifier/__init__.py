@@ -96,9 +96,10 @@ def validate_notifier_env(suffix: str = "") -> bool:
 
         try:
             cls(suffix=suffix)
-        except SystemExit:
+        except SystemExit as exc:
             from cli.core import die  # lazy: cli/ not available in Docker containers
-            die(f"Notifier {name!r} partially configured — check env vars")
+            detail = str(exc) if str(exc) else f"Notifier {name!r} partially configured"
+            die(f"{detail} — check env vars")
 
     return True
 

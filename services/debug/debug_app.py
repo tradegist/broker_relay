@@ -17,7 +17,13 @@ log = logging.getLogger("debug-webhook")
 
 HTTP_PORT = 9000
 DEBUG_PATH = os.environ.get("DEBUG_WEBHOOK_PATH", "")
-MAX_PAYLOADS = min(int(os.environ.get("MAX_DEBUG_WEBHOOK_PAYLOADS", "100")), 150)
+_raw_max = os.environ.get("MAX_DEBUG_WEBHOOK_PAYLOADS", "100")
+try:
+    MAX_PAYLOADS = min(int(_raw_max), 150)
+except ValueError:
+    raise SystemExit(
+        f"Invalid MAX_DEBUG_WEBHOOK_PAYLOADS={_raw_max!r} — must be an integer"
+    ) from None
 
 PayloadEntry = dict[str, object]
 _inbox: list[PayloadEntry] = []

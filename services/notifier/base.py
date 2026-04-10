@@ -30,12 +30,9 @@ class BaseNotifier(ABC):
             if not os.environ.get(f"{var}{suffix}")
         ]
         if missing:
-            log.error(
-                "Notifier %r requires env vars: %s",
-                self.name,
-                ", ".join(missing),
-            )
-            raise SystemExit(1)
+            msg = f"Notifier {self.name!r} requires env vars: {', '.join(missing)}"
+            log.error("%s", msg)
+            raise SystemExit(msg)
 
     @staticmethod
     @abstractmethod
