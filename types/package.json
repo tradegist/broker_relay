@@ -6,8 +6,7 @@
   "files": [
     "index.d.ts",
     "shared/",
-    "poller/",
-    "http/"
+    "poller/"
   ],
   "license": "MIT"
 }
