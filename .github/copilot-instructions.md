@@ -36,7 +36,7 @@
   4. `make e2e-down` — tear down **only after all tests pass**. Never tear down between iterations.
 - When modifying any Python file (`.py`), always run `make test`, `make typecheck`, and `make lint` and confirm all pass before deploying.
 - **Every Python file must be covered by `make typecheck`.** When adding a new Python service, package, or standalone script, immediately add it to the mypy invocation in the Makefile. No Python file may exist outside mypy's scope.
-- After modifying any model in `services/poller/models_poller.py` or `services/remote-client/models_remote_client.py`, also run `make types` to regenerate the TypeScript definitions.
+- After modifying any model in `services/poller/poller_models.py` or `services/remote-client/rc_models.py`, also run `make types` to regenerate the TypeScript definitions.
 - **Always verify type safety by breaking it first.** After any refactor that touches types or model construction, deliberately introduce a type error (e.g. pass a `str` where `float` is expected), run `make typecheck`, and confirm it **fails**. Then revert and confirm it passes. Never assume mypy catches something — prove it.
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)` — mypy cannot type-check `**dict[str, Any]`. Use explicit keyword arguments or `model_copy(update=...)` instead.
 - **Prefer strict `Literal` types over bare `str` on Pydantic models.** Financial applications demand precision — a `str` field silently accepts typos and invalid values. When a field has a known set of valid values (e.g. `Action`, `OrderType`, `SecType`, `TimeInForce`), always use the existing `Literal` type. Only fall back to `str` when the external source (e.g. IB Gateway) genuinely returns unbounded values — and document why with an inline comment. At the mapping boundary (e.g. `_map_trade`), use `cast()` so mypy is satisfied and Pydantic validates at runtime.
@@ -90,8 +90,11 @@
 - **`.venv` is the project's virtual environment.** Created by `make setup` using Homebrew Python. All dev dependencies are installed there.
 - **Auto-activation** is configured in `~/.zshrc` via a `chpwd` hook — the venv activates automatically when `cd`'ing into the project directory.
 - **`make setup`** creates the `.venv` (if missing), installs all dependencies (`requirements-dev.txt` + both service requirements), and writes a `.pth` file (see below).
-- **`ibkr-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `services/poller/`, `services/remote-client/`, `services/debug/`, and `services/` to `sys.path` so that `from models_poller import ...`, `from models_remote_client import ...`, `from debug_app import ...`, and `from notifier import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
+- **`ibkr-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `services/poller/`, `services/remote-client/`, `services/debug/`, and `services/` to `sys.path` so that `from poller_models import ...`, `from rc_models import ...`, `from debug_app import ...`, and `from notifier import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
 - **`.venv/` is gitignored** — never commit it.
+- **`docker-compose.local.yml` adds bind mounts** that shadow the `COPY`'d files in the image with your local source tree (`:ro`). This means code changes are visible on container restart — no rebuild needed. `make local-up` builds the images once; after that, `make sync` (when `DEFAULT_CLI_RELAY_ENV=local`) just restarts containers.
+- **`make sync` respects `DEFAULT_CLI_RELAY_ENV`.** When set to `local`, `make sync` restarts the local compose stack. When `prod` (default), it runs the full CLI sync to the droplet. Override per-command with `ENV=local` or `ENV=prod`.
+- **`make logs` also respects `DEFAULT_CLI_RELAY_ENV`.** `make logs S=ibkr-debug` streams local container logs when local, droplet logs when prod.
 
 ## Dependency Management
 
@@ -239,7 +242,7 @@ The `services/remote-client/` service is organized into packages:
 ```
 services/remote-client/
   main.py                  # Entrypoint (connection + HTTP server)
-  models_remote_client.py  # Pydantic request/response models (order API)
+  rc_models.py             # Pydantic request/response models (order API)
   client/                  # IB Gateway client (namespace delegation)
     __init__.py            # IBClient class (connection management)
     orders.py              # OrdersNamespace: place(contract_req, order_req)
@@ -276,7 +279,7 @@ The `services/poller/` service follows the same package pattern:
 ```
 services/poller/
   main.py                  # Entrypoint (polling loop + HTTP API startup)
-  models_poller.py         # Re-export shim (shared models + poller-specific API types)
+  poller_models.py         # Re-export shim (shared models + poller-specific API types)
   poller/                  # Core polling logic (package)
     __init__.py            # SQLite dedup, Flex fetch, poll_once()
     flex_parser.py         # XML parser (Activity Flex + Trade Confirmation)
@@ -296,7 +299,7 @@ services/poller/
 
 - **`services/poller/poller/`** contains core logic: SQLite dedup, Flex Web Service two-step fetch, and `poll_once()`. Notification delivery is delegated to the notifier package (see below).
 - **`services/poller/poller_routes/`** contains the HTTP API for on-demand polls (`POST /ibkr/poller/run`).
-- **`services/poller/models_poller.py`** is a re-export shim for shared models plus poller-specific API types (`RunPollResponse`, `HealthResponse`). The shared models (`Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`) live in `services/shared/__init__.py`.
+- **`services/poller/poller_models.py`** is a re-export shim for shared models plus poller-specific API types (`RunPollResponse`, `HealthResponse`). The shared models (`Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`) live in `services/shared/__init__.py`.
 
 ## Notifier Structure
 
@@ -383,16 +386,16 @@ This project has **three model locations** — a shared source of truth and two 
 | File                                             | Domain                | Contains                                                                                                                                      |
 | ------------------------------------------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `services/shared/__init__.py`                    | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `aggregate_fills()`, `_dedup_id()` |
-| `services/poller/models_poller.py`               | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                                                |
-| `services/remote-client/models_remote_client.py` | Order API (inbound)   | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types                                                 |
+| `services/poller/poller_models.py`               | Poller API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                                                |
+| `services/remote-client/rc_models.py`            | Order API (inbound)   | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types                                                 |
 
 - **`services/shared/__init__.py`** is the single source of truth for all webhook payload models. Both poller and remote-client import from it.
-- **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `services/poller/` and `services/remote-client/` are on `sys.path` (via the `.pth` file). Use `from shared import Fill` for shared types, `from models_poller import RunPollResponse` for poller-specific types.
+- **Unique filenames** (`poller_models.py`, `rc_models.py`) prevent import collisions when both `services/poller/` and `services/remote-client/` are on `sys.path` (via the `.pth` file). Use `from shared import Fill` for shared types, `from poller_models import RunPollResponse` for poller-specific types.
 - **Model shims only re-export models and types** (Pydantic models, enums, type aliases). Utility functions (`aggregate_fills`, `normalize_order_type`, `_dedup_id`) must be imported directly from the owning module: `from shared import aggregate_fills`. Never re-export functions through model shims.
-- `models_poller.py` re-exports shared models and defines poller-specific API types. Its `SCHEMA_MODELS` contains only `[RunPollResponse, HealthResponse]`.
+- `poller_models.py` re-exports shared models and defines poller-specific API types. Its `SCHEMA_MODELS` contains only `[RunPollResponse, HealthResponse]`.
 - `shared/__init__.py` defines `SCHEMA_MODELS = [WebhookPayloadTrades, Trade, Fill]` for the shared types.
-- `models_remote_client.py` is the source of truth for `IbkrHttp` TypeScript types (`make types`).
-- `models_remote_client.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
+- `rc_models.py` is the source of truth for `IbkrHttp` TypeScript types (`make types`).
+- `rc_models.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
 - All external-contract models use `ConfigDict(extra="forbid")` for strict validation.
 
 ## Naming Convention for API Models
@@ -469,8 +472,8 @@ export * as Kraken from "./shared";
 - **Three namespaces**: `Ibkr` (shared webhook payload types), `IbkrPoller` (poller-specific API types), and `IbkrHttp` (order API types).
 - **`make types`** regenerates all three from Pydantic models:
   - `services/shared/__init__.py` → `types/shared/types.d.ts` (CommonFill models: WebhookPayloadTrades, Trade, Fill, BuySell)
-  - `services/poller/models_poller.py` → `types/poller/types.d.ts` (poller-specific: RunPollResponse, HealthResponse)
-  - `services/remote-client/models_remote_client.py` → `types/http/types.d.ts` (order API types)
+  - `services/poller/poller_models.py` → `types/poller/types.d.ts` (poller-specific: RunPollResponse, HealthResponse)
+  - `services/remote-client/rc_models.py` → `types/http/types.d.ts` (order API types)
 - **Structure:**
   ```
   types/
@@ -482,15 +485,15 @@ export * as Kraken from "./shared";
       types.schema.json         # Intermediate JSON Schema
     poller/
       index.d.ts               # Re-exports: RunPollResponse, HealthResponse
-      types.d.ts               # Generated from poller/models_poller.py (SCHEMA_MODELS)
+      types.d.ts               # Generated from poller/poller_models.py (SCHEMA_MODELS)
       types.schema.json         # Intermediate JSON Schema
     http/
       index.d.ts               # Re-exports: PlaceOrderPayload, ContractPayload, OrderPayload, PlaceOrderResponse
-      types.d.ts               # Generated from remote-client/models_remote_client.py (SCHEMA_MODELS)
+      types.d.ts               # Generated from remote-client/rc_models.py (SCHEMA_MODELS)
       types.schema.json         # Intermediate JSON Schema
   ```
 - **Usage:** `import { Ibkr, IbkrPoller, IbkrHttp } from "@tradegist/ibkr-relay-types"`
-- Each model file declares a `SCHEMA_MODELS` list at the bottom — `schema_gen.py` reads it to generate the JSON Schema. **To export a new model to TypeScript, append it to `SCHEMA_MODELS` in the relevant `models_*.py` or `shared/__init__.py` file and update the corresponding `types/*/index.d.ts` re-exports.**
+- Each model file declares a `SCHEMA_MODELS` list at the bottom — `schema_gen.py` reads it to generate the JSON Schema. **To export a new model to TypeScript, append it to `SCHEMA_MODELS` in the relevant model shim (`poller_models.py`, `rc_models.py`) or `shared/__init__.py` file and update the corresponding `types/*/index.d.ts` re-exports.**
 
 ## Code Style
 
@@ -560,7 +563,7 @@ cli/                    # Python CLI (operator scripts)
 services/               # Business-logic services (user-facing features)
   remote-client/        # remote-client service (see Remote Client Structure above)
   poller/               # Flex poller service (see Poller Structure above)
-    models_poller.py    # Pydantic models: Fill, Trade, WebhookPayloadTrades, WebhookPayload, BuySell, Source
+    poller_models.py    # Pydantic models: Fill, Trade, WebhookPayloadTrades, WebhookPayload, BuySell, Source
   debug/                # Debug webhook inbox service (see Debug Webhook Service below)
   notifier/             # Pluggable notification backends (library, no container)
   dedup/                # Shared SQLite dedup library (library, no container)

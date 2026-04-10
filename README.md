@@ -266,17 +266,23 @@ make local-down   # stop and remove containers
 
 Endpoints after startup:
 
-| Service   | URL                           |
-| --------- | ----------------------------- |
-| REST API  | http://localhost:15000/health |
-| Poller    | http://localhost:15001/health |
-| VNC (2FA) | http://localhost:15002        |
+| Service   | URL                                                                            |
+| --------- | ------------------------------------------------------------------------------ |
+| REST API  | http://localhost:15000/health                                                  |
+| Poller    | http://localhost:15001/health                                                  |
+| VNC (2FA) | http://localhost:15002                                                         |
+| Debug     | http://localhost:15003/debug/webhook/{path} (when `DEBUG_WEBHOOK_PATH` is set) |
 
-If you change `.env`, refresh the running stack without rebuilding:
+#### Updating the local stack after code changes
+
+`docker-compose.local.yml` adds read-only bind mounts that shadow the baked-in image files with your local source tree. This means **code changes are visible on container restart — no rebuild needed**:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+make sync                    # restart all containers (when DEFAULT_CLI_RELAY_ENV=local)
+make sync ENV=local          # explicit: restart local stack
 ```
+
+`make local-up` is only needed for the initial build or after changing `requirements.txt` / Dockerfile.
 
 ## TypeScript Types
 
@@ -288,11 +294,11 @@ types/
   package.json               # @tradegist/ibkr-relay-types
   poller/
     index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
-    types.d.ts               # Generated from models_poller.py SCHEMA_MODELS
+    types.d.ts               # Generated from poller_models.py SCHEMA_MODELS
     types.schema.json         # Intermediate JSON Schema
   http/
     index.d.ts               # Re-exports: PlaceOrderPayload, ContractPayload, OrderPayload, PlaceOrderResponse
-    types.d.ts               # Generated from models_remote_client.py SCHEMA_MODELS
+    types.d.ts               # Generated from rc_models.py SCHEMA_MODELS
     types.schema.json         # Intermediate JSON Schema
 ```
 
@@ -492,7 +498,7 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make local-up    Start full stack locally (no TLS, direct port access)
   make local-down  Stop local stack
   make gateway     Start IB Gateway container (then open VNC for 2FA)
-  make logs        Stream poller logs (Ctrl+C to stop)
+  make logs        Stream logs (S=service ENV=local, default: poller on droplet)
   make stats       Show container resource usage
   make ssh         SSH into the droplet
   make help        Show available commands
@@ -537,9 +543,11 @@ make test-webhook                              # send 3 sample trades to webhook
 make test-webhook S=2                          # send to second webhook
 make test                                      # run unit tests
 make typecheck                                 # strict mypy checking
-make logs                                      # stream poller logs
+make logs                                      # stream poller logs (droplet)
 make logs S=remote-client                      # stream relay logs
 make logs S=ib-gateway                         # stream gateway logs
+make logs S=ibkr-debug                         # stream debug inbox logs
+make logs ENV=local                            # stream local stack logs
 make gateway                                   # start gateway + complete 2FA in browser
 ```
 
@@ -575,6 +583,17 @@ make local-up REMOTE_CLIENT=0  # start local stack without gateway
 ```
 
 ### Syncing code changes
+
+#### Local stack
+
+When `DEFAULT_CLI_RELAY_ENV=local` (or `ENV=local`), `make sync` simply restarts all containers. Bind mounts in `docker-compose.local.yml` ensure your code changes are picked up automatically — no rebuild needed:
+
+```bash
+make sync              # restart containers (when DEFAULT_CLI_RELAY_ENV=local)
+make sync ENV=local    # explicit override
+```
+
+#### Remote droplet
 
 `make sync` only pushes `.env` and restarts containers — it does **not** update source files on the droplet. When you change Python code, Dockerfiles, or Compose config, use `LOCAL_FILES=1` to sync everything:
 
@@ -644,7 +663,7 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt       # ib_async, aiohttp
 │   │   ├── main.py                # Entrypoint (connection + HTTP server)
-│   │   ├── models_remote_client.py # Pydantic models (order API types)
+│   │   ├── rc_models.py           # Pydantic models (order API types)
 │   │   ├── client/                # IB Gateway client (namespace delegation)
 │   │   │   ├── __init__.py        # IBClient class (connection management)
 │   │   │   ├── orders.py          # OrdersNamespace (place orders)
@@ -662,7 +681,7 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │       ├── Dockerfile
 │       ├── requirements.txt       # httpx, pydantic, aiohttp
 │       ├── main.py                # Entrypoint (polling loop + HTTP API)
-│       ├── models_poller.py       # Re-export shim (shared models + poller-specific API types)
+│       ├── poller_models.py       # Re-export shim (shared models + poller-specific API types)
 │       ├── poller/                # Core polling logic (package)
 │       │   ├── __init__.py        # SQLite dedup, Flex fetch, poll_once()
 │       │   ├── flex_parser.py     # Flex XML parser (Activity + Trade Confirmation)
@@ -696,10 +715,10 @@ make sync LOCAL_FILES=1  # deploy to your droplet
     ├── package.json
     ├── poller/                # IbkrPoller namespace
     │   ├── index.d.ts
-    │   └── types.d.ts         # Generated from models_poller.py SCHEMA_MODELS
+    │   └── types.d.ts         # Generated from poller_models.py SCHEMA_MODELS
     └── http/                  # IbkrHttp namespace
         ├── index.d.ts
-        └── types.d.ts         # Generated from models_remote_client.py SCHEMA_MODELS
+        └── types.d.ts         # Generated from rc_models.py SCHEMA_MODELS
 
 ```
 
@@ -813,7 +832,7 @@ Example response:
 }
 ```
 
-**Order API** field names mirror `ib_async` exactly (e.g. `lmtPrice`, `totalQuantity`, `secType`, `tif`, `outsideRth`). See [`services/remote-client/models_remote_client.py`](services/remote-client/models_remote_client.py) for the full schema.
+**Order API** field names mirror `ib_async` exactly (e.g. `lmtPrice`, `totalQuantity`, `secType`, `tif`, `outsideRth`). See [`services/remote-client/rc_models.py`](services/remote-client/rc_models.py) for the full schema.
 
 > **Note**: The gateway must have `READ_ONLY_API=no` for orders to be accepted.
 
@@ -892,19 +911,17 @@ make ssh
 Stream poller logs in real-time (useful for checking fill deliveries):
 
 ```bash
-make logs
+make logs                    # droplet (default)
+make logs S=remote-client    # different service
+make logs S=ib-gateway       # gateway logs
+make logs S=ibkr-debug       # debug inbox logs
 ```
 
-Stream remote client logs:
+Targets the droplet by default. Set `DEFAULT_CLI_RELAY_ENV=local` in `.env` (or pass `ENV=local`) to stream from the local stack instead:
 
 ```bash
-make logs S=remote-client
-```
-
-Stream IB Gateway logs:
-
-```bash
-make logs S=ib-gateway
+make logs ENV=local          # local poller
+make logs S=ibkr-debug       # local debug inbox (when DEFAULT_CLI_RELAY_ENV=local)
 ```
 
 ## Security
