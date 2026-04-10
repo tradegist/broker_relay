@@ -32,11 +32,13 @@ def validate_poller_env(suffix=""):
     """
     if suffix:
         # Poller-2: only the query ID is required
-        query_id = os.environ.get(f"IBKR_FLEX_QUERY_ID{suffix}")
+        query_id = os.environ.get(f"IBKR_FLEX_QUERY_ID{suffix}", "").strip()
         if not query_id:
             return False
         # If a dedicated token isn't set, the primary token must exist
-        if not os.environ.get(f"IBKR_FLEX_TOKEN{suffix}") and not os.environ.get("IBKR_FLEX_TOKEN"):
+        token_2 = os.environ.get(f"IBKR_FLEX_TOKEN{suffix}", "").strip()
+        token_1 = os.environ.get("IBKR_FLEX_TOKEN", "").strip()
+        if not token_2 and not token_1:
             die(f"Poller{suffix} has IBKR_FLEX_QUERY_ID{suffix} but "
                 f"neither IBKR_FLEX_TOKEN{suffix} nor IBKR_FLEX_TOKEN is set")
         return True
@@ -45,7 +47,7 @@ def validate_poller_env(suffix=""):
     missing = []
     set_count = 0
     for var in required:
-        if os.environ.get(var):
+        if os.environ.get(var, "").strip():
             set_count += 1
         else:
             missing.append(var)

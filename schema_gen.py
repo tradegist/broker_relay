@@ -4,7 +4,7 @@ Usage: python schema_gen.py <module>
 
 Reads the SCHEMA_MODELS list from the given module and writes a
 combined JSON Schema to stdout.  The .pth file in the venv ensures
-both poller_models and rc_models are importable.
+modules like poller_models are importable.
 """
 
 import importlib
@@ -73,36 +73,39 @@ def _hoist_literal_aliases(schema: dict[str, object], module: types.ModuleType) 
         raise RuntimeError("schema['$defs'] is not a dict")
 
     # Add each alias as a $defs entry
+    alias_names: set[str] = set()
     for values, name in aliases.items():
+        alias_names.add(name)
         if name not in defs:
             defs[name] = {"enum": sorted(values), "type": "string"}
 
-    # Walk all properties and replace matching inline enums
-    _replace_inline_enums(schema, aliases)
+    # Replace inline enums only in model definitions (skip alias defs
+    # themselves to avoid self-referencing $ref).
+    for name, defn in defs.items():
+        if name not in alias_names:
+            _replace_inline_enums(defn, aliases)
 
 
 def _replace_inline_enums(obj: object, aliases: dict[frozenset[str], str]) -> None:
-    """Recursively replace {enum: [...], type: "string"} with $ref."""
+    """Recursively replace any matching inline string enum schema with $ref."""
     if isinstance(obj, dict):
-        if "properties" in obj and isinstance(obj["properties"], dict):
-            for _prop_name, prop_val in obj["properties"].items():
-                if not isinstance(prop_val, dict):
-                    continue
-                enum = prop_val.get("enum")
-                if enum and prop_val.get("type") == "string":
-                    key = frozenset(enum)
-                    if key in aliases:
-                        ref = {"$ref": f"#/$defs/{aliases[key]}"}
-                        extra = {k: v for k, v in prop_val.items()
-                                 if k not in ("enum", "type")}
-                        prop_val.clear()
-                        if extra:
-                            # Wrap in allOf so json-schema-to-typescript
-                            # resolves $ref even with default present.
-                            prop_val["allOf"] = [ref]
-                            prop_val.update(extra)
-                        else:
-                            prop_val.update(ref)
+        enum = obj.get("enum")
+        if enum and obj.get("type") == "string":
+            key = frozenset(enum)
+            alias_name = aliases.get(key)
+            if alias_name is not None:
+                ref = {"$ref": f"#/$defs/{alias_name}"}
+                extra = {
+                    k: v for k, v in obj.items() if k not in ("enum", "type")
+                }
+                obj.clear()
+                if extra:
+                    # Wrap in allOf so json-schema-to-typescript
+                    # resolves $ref even with sibling schema metadata present.
+                    obj["allOf"] = [ref]
+                    obj.update(extra)
+                else:
+                    obj.update(ref)
         for val in obj.values():
             _replace_inline_enums(val, aliases)
     elif isinstance(obj, list):

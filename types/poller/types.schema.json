@@ -27,14 +27,7 @@
         "orderType": {
           "anyOf": [
             {
-              "enum": [
-                "market",
-                "limit",
-                "stop",
-                "stop_limit",
-                "trailing_stop"
-              ],
-              "type": "string"
+              "$ref": "#/$defs/OrderType"
             },
             {
               "type": "null"

@@ -234,7 +234,10 @@ All configuration is via environment variables in `.env`:
 
 | Variable                     | Required | Default         | Description                                                                                                     |
 | ---------------------------- | -------- | --------------- | --------------------------------------------------------------------------------------------------------------- |
-| `DO_API_TOKEN`               | Yes      | —               | DigitalOcean API token                                                                                          |
+| `DEPLOY_MODE`                | Yes      | —               | `standalone` (own droplet via Terraform) or `shared` (deploy to existing droplet)                               |
+| `DO_API_TOKEN`               | Yes*     | —               | DigitalOcean API token (standalone mode only — can be removed after first deploy)                               |
+| `DROPLET_IP`                 | Yes*     | —               | Droplet IP (from Terraform output in standalone; provided by host in shared)                                    |
+| `SSH_KEY`                    | No       | `~/.ssh/ibkr-relay` | SSH key path — **shared mode only**. In standalone, Terraform auto-generates and saves the key; never set this. |
 | `SITE_DOMAIN`                | Yes      | —               | Domain for the poller API (see [Domains & HTTPS](#domains--https))                                              |
 | `API_TOKEN`                  | Yes      | —               | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)                                                   |
 | `IBKR_FLEX_TOKEN`            | Yes      | —               | Flex Web Service token (from Client Portal)                                                                     |
