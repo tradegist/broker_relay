@@ -15,7 +15,13 @@ log = logging.getLogger("poller")
 
 
 def get_poller_api_port() -> int:
-    return int(os.environ.get("POLLER_API_PORT", "8000"))
+    raw = os.environ.get("POLLER_API_PORT", "8000").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"Invalid POLLER_API_PORT={raw!r} — must be an integer"
+        ) from None
 
 
 def create_routes(

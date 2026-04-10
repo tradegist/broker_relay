@@ -27,9 +27,14 @@ def get_trading_mode() -> str:
 
 def get_ib_port() -> int:
     mode = get_trading_mode()
-    return int(os.environ.get(
-        "IB_LIVE_PORT" if mode == "live" else "IB_PAPER_PORT", "4004"
-    ))
+    var = "IB_LIVE_PORT" if mode == "live" else "IB_PAPER_PORT"
+    raw = os.environ.get(var, "4004").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"Invalid {var}={raw!r} — must be an integer"
+        ) from None
 
 
 class IBClient:

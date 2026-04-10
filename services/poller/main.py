@@ -44,13 +44,9 @@ async def _poll_loop(
 
 async def amain() -> None:
     """Continuous polling loop with HTTP API for on-demand polls."""
-    flex_token = get_flex_token()
-    flex_query_id = get_flex_query_id()
+    get_flex_token()  # fail fast if missing
+    get_flex_query_id()  # fail fast if missing
     poll_interval = get_poll_interval()
-
-    if not flex_token or not flex_query_id:
-        log.error("IBKR_FLEX_TOKEN and IBKR_FLEX_QUERY_ID must be set")
-        raise SystemExit(1)
 
     log.info("IBKR Flex Poller starting (poll every %ds)", poll_interval)
 
@@ -71,12 +67,8 @@ async def amain() -> None:
 
 def main_once() -> None:
     """Single on-demand poll, then exit."""
-    flex_token = get_flex_token()
-    flex_query_id = get_flex_query_id()
-
-    if not flex_token or not flex_query_id:
-        log.error("IBKR_FLEX_TOKEN and IBKR_FLEX_QUERY_ID must be set")
-        raise SystemExit(1)
+    get_flex_token()  # fail fast if missing
+    get_flex_query_id()  # fail fast if missing
 
     debug = "--debug" in sys.argv
     replay = 0

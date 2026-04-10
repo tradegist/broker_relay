@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from aiohttp import web
 
-_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
 logging.basicConfig(
     level=getattr(logging, _LOG_LEVEL, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -24,8 +24,12 @@ _max_payloads_key = web.AppKey("max_payloads", int)
 _inbox_key = web.AppKey("inbox", list)
 
 
-def _parse_max_payloads() -> int:
-    raw = os.environ.get("MAX_DEBUG_WEBHOOK_PAYLOADS", "100")
+def _get_debug_webhook_path() -> str:
+    return os.environ.get("DEBUG_WEBHOOK_PATH", "").strip()
+
+
+def _get_max_payloads() -> int:
+    raw = os.environ.get("MAX_DEBUG_WEBHOOK_PAYLOADS", "100").strip()
     try:
         return min(int(raw), 150)
     except ValueError:
@@ -95,8 +99,8 @@ async def handle_health(request: web.Request) -> web.Response:
 
 def create_app() -> web.Application:
     app = web.Application()
-    app[_debug_path_key] = os.environ.get("DEBUG_WEBHOOK_PATH", "")
-    app[_max_payloads_key] = _parse_max_payloads()
+    app[_debug_path_key] = _get_debug_webhook_path()
+    app[_max_payloads_key] = _get_max_payloads()
     app[_inbox_key] = []
     app.router.add_post("/debug/webhook/{path}", handle_post)
     app.router.add_get("/debug/webhook/{path}", handle_get)
@@ -106,8 +110,8 @@ def create_app() -> web.Application:
 
 
 if __name__ == "__main__":
-    debug_path = os.environ.get("DEBUG_WEBHOOK_PATH", "")
-    max_payloads = _parse_max_payloads()
+    debug_path = _get_debug_webhook_path()
+    max_payloads = _get_max_payloads()
     if debug_path:
         log.info(
             "Debug webhook inbox starting on port %d (path=/debug/webhook/%s, max=%d)",

@@ -15,6 +15,10 @@ REGISTRY: dict[str, type[BaseNotifier]] = {
 }
 
 
+def _get_notifiers_config(suffix: str) -> str:
+    return os.environ.get(f"NOTIFIERS{suffix}", "").strip()
+
+
 def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
     """Read NOTIFIERS env var, instantiate backends, return ready list.
 
@@ -30,7 +34,7 @@ def load_notifiers(suffix: str = "") -> list[BaseNotifier]:
     Raises:
         SystemExit: If a notifier name is unknown or a backend rejects its config.
     """
-    raw = os.environ.get(f"NOTIFIERS{suffix}", "").strip()
+    raw = _get_notifiers_config(suffix)
     if not raw:
         log.info("No notifiers configured (NOTIFIERS%s is empty) — dry-run mode", suffix)
         _warn_orphaned_notifier_vars(suffix)
@@ -60,7 +64,7 @@ def _warn_orphaned_notifier_vars(suffix: str = "") -> None:
         orphaned = [
             f"{var}{suffix}"
             for var in cls.required_env_vars()
-            if os.environ.get(f"{var}{suffix}")
+            if os.environ.get(f"{var}{suffix}", "").strip()
         ]
         if orphaned:
             log.warning(
@@ -80,7 +84,7 @@ def validate_notifier_env(suffix: str = "") -> bool:
 
     Designed for CLI pre-deploy validation (cli/_pre_sync_hook).
     """
-    raw = os.environ.get(f"NOTIFIERS{suffix}", "").strip()
+    raw = _get_notifiers_config(suffix)
     if not raw:
         # Warn if notifier env vars are set but NOTIFIERS is empty —
         # likely a misconfiguration after the notifier migration.

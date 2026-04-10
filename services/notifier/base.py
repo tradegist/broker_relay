@@ -27,7 +27,7 @@ class BaseNotifier(ABC):
         missing = [
             f"{var}{suffix}"
             for var in self.required_env_vars()
-            if not os.environ.get(f"{var}{suffix}")
+            if not os.environ.get(f"{var}{suffix}", "").strip()
         ]
         if missing:
             msg = f"Notifier {self.name!r} requires env vars: {', '.join(missing)}"

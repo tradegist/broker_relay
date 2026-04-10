@@ -28,15 +28,27 @@ USER_AGENT = "ibkr-relay/1.0"
 
 
 def get_flex_token() -> str:
-    return os.environ.get("IBKR_FLEX_TOKEN", "").strip()
+    val = os.environ.get("IBKR_FLEX_TOKEN", "").strip()
+    if not val:
+        raise SystemExit("IBKR_FLEX_TOKEN must be set")
+    return val
 
 
 def get_flex_query_id() -> str:
-    return os.environ.get("IBKR_FLEX_QUERY_ID", "").strip()
+    val = os.environ.get("IBKR_FLEX_QUERY_ID", "").strip()
+    if not val:
+        raise SystemExit("IBKR_FLEX_QUERY_ID must be set")
+    return val
 
 
 def get_poll_interval() -> int:
-    return int(os.environ.get("POLL_INTERVAL_SECONDS", "600"))
+    raw = os.environ.get("POLL_INTERVAL_SECONDS", "600").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"Invalid POLL_INTERVAL_SECONDS={raw!r} — must be an integer"
+        ) from None
 
 
 def get_dedup_db_path() -> str:

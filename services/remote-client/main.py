@@ -25,7 +25,13 @@ log = logging.getLogger("remote-client")
 
 
 def get_api_port() -> int:
-    return int(os.environ.get("API_PORT", "5000"))
+    raw = os.environ.get("API_PORT", "5000").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"Invalid API_PORT={raw!r} — must be an integer"
+        ) from None
 
 
 def get_dedup_db_path() -> str:
@@ -33,7 +39,23 @@ def get_dedup_db_path() -> str:
 
 
 def get_debounce_ms() -> int:
-    return int(os.environ.get("LISTENER_EVENT_DEBOUNCE_TIME", "0"))
+    raw = os.environ.get("LISTENER_EVENT_DEBOUNCE_TIME", "0").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"Invalid LISTENER_EVENT_DEBOUNCE_TIME={raw!r} — must be an integer"
+        ) from None
+
+
+def get_listener_enabled() -> bool:
+    flag = os.environ.get("LISTENER_ENABLED", "").strip().lower()
+    return bool(flag and flag not in ("0", "false", "no"))
+
+
+def get_listener_exec_events_enabled() -> bool:
+    flag = os.environ.get("LISTENER_EXEC_EVENTS_ENABLED", "").strip().lower()
+    return bool(flag and flag not in ("0", "false", "no"))
 
 
 async def amain() -> None:
@@ -50,13 +72,11 @@ async def amain() -> None:
     client.ib.disconnectedEvent += client.on_disconnect
 
     # Start listener if enabled
-    listener_flag = os.environ.get("LISTENER_ENABLED", "").lower()
-    if listener_flag and listener_flag not in ("0", "false", "no"):
+    if get_listener_enabled():
         db_path = Path(dedup_db_path)
         db = init_db(db_path)
         notifiers = load_notifiers()
-        exec_flag = os.environ.get("LISTENER_EXEC_EVENTS_ENABLED", "").lower()
-        exec_events_enabled = bool(exec_flag and exec_flag not in ("0", "false", "no"))
+        exec_events_enabled = get_listener_exec_events_enabled()
         client.listener = ListenerNamespace(
             client.ib, notifiers, db,
             debounce_ms=debounce_ms,
