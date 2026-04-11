@@ -4,7 +4,7 @@ PROJECT = ibkr-relay
 PYTHON ?= .venv/bin/python3
 E2E_ENV = .env.test
 E2E_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.test.yml -p $(PROJECT)-test --env-file $(E2E_ENV)
-E2E_COMPOSE_DOWN = docker compose -f docker-compose.yml -f docker-compose.test.yml -p $(PROJECT)-test
+E2E_COMPOSE_DOWN = docker compose -f docker-compose.yml -f docker-compose.test.yml -p $(PROJECT)-test --env-file $(E2E_ENV)
 LOCAL_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.local.yml
 CLI_RELAY_ENV = $(if $(ENV),RELAY_ENV=$(ENV))
 
@@ -148,7 +148,7 @@ e2e-down: ## Stop and remove E2E test stack
 
 e2e-run: ## Run E2E tests (stack must be up)
 	@$(E2E_COMPOSE) restart poller ibkr-debug > /dev/null 2>&1 && sleep 3
-	$(PYTHON) -m pytest services/poller/tests/e2e/ -v
+	$(PYTHON) -m pytest services/poller/tests/e2e/ services/listener/tests/e2e/ -v
 
 e2e: ## Run E2E tests (starts/stops stack automatically)
 	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — run: cp .env.test.example .env.test (placeholder values are fine)"; exit 1; }
