@@ -548,3 +548,130 @@ class TestDebounceBuffer(unittest.IsolatedAsyncioTestCase):
         # Wait for the debounce timer to fire
         await asyncio.sleep(0.15)
         mock_send.assert_called_once()
+
+    @patch("listener._send_and_mark", side_effect=RuntimeError("webhook down"))
+    async def test_flush_restores_fills_on_error(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """Fills are re-added to the buffer when _send_and_mark raises."""
+        from listener import _DebounceBuffer
+
+        buf = _DebounceBuffer(
+            debounce_ms=5000, notifiers=[], db_path="/tmp/test.db",
+        )
+        envelope = _make_envelope(exec_id="ERR1")
+        fill = map_fill(envelope)
+        assert fill is not None
+
+        await buf.add(fill)
+        self.assertEqual(len(buf._buffer), 1)
+
+        # flush() catches Exception — should not raise
+        await buf.flush()
+        mock_send.assert_called_once()
+        # Fill must be restored
+        self.assertEqual(len(buf._buffer), 1)
+        self.assertEqual(buf._buffer[0].execId, "ERR1")
+
+    async def test_flush_restores_fills_on_cancellation(self) -> None:
+        """Fills are re-added when flush is cancelled during to_thread."""
+        from listener import _DebounceBuffer
+
+        flush_started = asyncio.Event()
+
+        async def slow_to_thread(*args: Any, **kwargs: Any) -> None:
+            flush_started.set()
+            await asyncio.sleep(10)  # Will be cancelled
+
+        buf = _DebounceBuffer(
+            debounce_ms=5000, notifiers=[], db_path="/tmp/test.db",
+        )
+        envelope = _make_envelope(exec_id="CAN1")
+        fill = map_fill(envelope)
+        assert fill is not None
+        await buf.add(fill)
+
+        with patch("asyncio.to_thread", side_effect=slow_to_thread):
+            task = asyncio.create_task(buf.flush())
+            await flush_started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        # Fill must be restored and flushing flag reset
+        self.assertEqual(len(buf._buffer), 1)
+        self.assertEqual(buf._buffer[0].execId, "CAN1")
+        self.assertFalse(buf._flushing)
+
+    async def test_add_does_not_cancel_in_progress_flush(self) -> None:
+        """add() skips cancel when a flush is already in progress."""
+        from listener import _DebounceBuffer
+
+        flush_entered = asyncio.Event()
+        flush_proceed = asyncio.Event()
+
+        async def gated_to_thread(fn: Any, *args: Any) -> None:
+            flush_entered.set()
+            await flush_proceed.wait()
+
+        buf = _DebounceBuffer(
+            debounce_ms=5000, notifiers=[], db_path="/tmp/test.db",
+        )
+        envelope1 = _make_envelope(exec_id="F001")
+        fill1 = map_fill(envelope1)
+        assert fill1 is not None
+        await buf.add(fill1)
+
+        with patch("asyncio.to_thread", side_effect=gated_to_thread):
+            # Start flush manually (debounce_ms is large, so no auto-fire)
+            flush_task = asyncio.create_task(buf.flush())
+            await flush_entered.wait()
+            self.assertTrue(buf._flushing)
+
+            # add() during flush — should NOT cancel flush_task
+            envelope2 = _make_envelope(exec_id="F002")
+            fill2 = map_fill(envelope2)
+            assert fill2 is not None
+            await buf.add(fill2)
+
+            # The flush task must still be running (not cancelled)
+            self.assertFalse(flush_task.done())
+
+            # Let flush complete
+            flush_proceed.set()
+            await flush_task
+
+        # F002 remains in buffer for the next flush
+        self.assertIn("F002", [f.execId for f in buf._buffer])
+        self.assertFalse(buf._flushing)
+
+    @patch("listener._send_and_mark", side_effect=RuntimeError("boom"))
+    async def test_fills_added_during_failed_flush_preserved(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """Fills added while flush is in-flight are not lost on error."""
+        from listener import _DebounceBuffer
+
+        buf = _DebounceBuffer(
+            debounce_ms=5000, notifiers=[], db_path="/tmp/test.db",
+        )
+        envelope1 = _make_envelope(exec_id="OLD1")
+        fill1 = map_fill(envelope1)
+        assert fill1 is not None
+
+        envelope2 = _make_envelope(exec_id="NEW1")
+        fill2 = map_fill(envelope2)
+        assert fill2 is not None
+
+        await buf.add(fill1)
+        # Manually trigger flush (will fail), then add fill2 to simulate
+        # a fill arriving while flush was in progress
+        await buf.flush()
+
+        # OLD1 was restored to front on error
+        self.assertEqual(buf._buffer[0].execId, "OLD1")
+
+        # Now add NEW1 — it should go after the restored fills
+        await buf.add(fill2)
+        exec_ids = [f.execId for f in buf._buffer]
+        self.assertEqual(exec_ids, ["OLD1", "NEW1"])

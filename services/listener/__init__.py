@@ -202,9 +202,14 @@ def _send_and_mark(
             )
 
         # Notify then mark (mark-after-notify pattern).
-        # NOTE: notify() currently swallows per-backend exceptions.
-        # When notifier-resilience changes land, this will automatically
-        # benefit from retry + failure propagation.
+        # WARNING: notify() currently swallows per-backend exceptions
+        # without raising, so mark_processed_batch() always executes —
+        # even when all notifiers fail.  Since the listener shares the
+        # dedup DB with the Flex poller, those execIds are permanently
+        # suppressed (poller dedup-skips them on the next cycle).
+        # See docs/notifier-resilience.md for the planned fix:
+        # notify() will raise NotificationError when ALL backends fail,
+        # preventing mark and allowing retry on the next flush.
         payload = WebhookPayloadTrades(data=trades, errors=[])
         notify(notifiers, payload)
 
@@ -250,11 +255,17 @@ class _DebounceBuffer:
         self._db_path = db_path
         self._buffer: list[Fill] = []
         self._flush_task: asyncio.Task[None] | None = None
+        self._flushing = False
 
     async def add(self, fill: Fill) -> None:
         """Add a fill and (re)start the debounce timer."""
         self._buffer.append(fill)
-        if self._flush_task is not None and not self._flush_task.done():
+        # Only cancel the pending sleep — never cancel an in-progress flush.
+        if (
+            self._flush_task is not None
+            and not self._flush_task.done()
+            and not self._flushing
+        ):
             self._flush_task.cancel()
         self._flush_task = asyncio.create_task(self._delayed_flush())
 
@@ -266,16 +277,25 @@ class _DebounceBuffer:
         """Flush all buffered fills — safe to call even if empty."""
         if not self._buffer:
             return
+        self._flushing = True
         fills = self._buffer.copy()
         self._buffer.clear()
         try:
             await asyncio.to_thread(
                 _send_and_mark, fills, self._notifiers, self._db_path,
             )
+        except asyncio.CancelledError:
+            log.warning(
+                "Flush cancelled — restoring %d fill(s) to buffer", len(fills),
+            )
+            self._buffer = fills + self._buffer
+            raise
         except Exception:
             log.exception("Failed to dispatch %d buffered fill(s)", len(fills))
             # Re-add to front so they are retried on next flush
             self._buffer = fills + self._buffer
+        finally:
+            self._flushing = False
 
 
 # ── WebSocket event handler ──────────────────────────────────────────
