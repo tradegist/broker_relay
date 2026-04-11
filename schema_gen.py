@@ -140,5 +140,13 @@ if __name__ == "__main__":
     if model_names is None:
         print(f"ERROR: no SCHEMA_MODELS entry for {mod_name!r}", file=sys.stderr)
         sys.exit(1)
-    models = [getattr(mod, name) for name in model_names]
+    models = []
+    for name in model_names:
+        if not hasattr(mod, name):
+            print(
+                f"ERROR: model {name!r} not found in module {mod_name!r}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        models.append(getattr(mod, name))
     generate_schema(mod, models)
