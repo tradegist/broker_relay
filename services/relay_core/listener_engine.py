@@ -189,13 +189,21 @@ class DebounceBuffer:
 
 async def _handle_event(
     relay_name: RelayName,
-    data: dict[str, Any],
+    data: Any,
     config: ListenerConfig,
     notifiers: list[BaseNotifier],
     debounce_buf: DebounceBuffer | None,
     db_path: str,
 ) -> None:
     """Process a single parsed WS message using adapter callbacks."""
+    # json.loads can return any JSON type — only dicts are valid events.
+    if not isinstance(data, dict):
+        log.warning(
+            "[%s] Ignoring non-dict WS message: %s",
+            relay_name, type(data).__name__,
+        )
+        return
+
     # Let the adapter decide if this event is relevant
     if not config.event_filter(data):
         return

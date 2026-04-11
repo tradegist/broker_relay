@@ -333,6 +333,106 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
             debounce_buf=None, db_path="/tmp/test.db",
         )
 
+    async def test_non_dict_string_skipped(self) -> None:
+        """A JSON string (not a dict) is silently skipped."""
+        called = False
+
+        async def on_msg(
+            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
+        ) -> None:
+            nonlocal called
+            called = True
+
+        config = ListenerConfig(
+            ws_url="ws://localhost/ws", api_token="t",
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        await _handle_event(
+            "ibkr", "just a string", config, notifiers=[],
+            debounce_buf=None, db_path="/tmp/test.db",
+        )
+        self.assertFalse(called)
+
+    async def test_non_dict_list_skipped(self) -> None:
+        """A JSON array (not a dict) is silently skipped."""
+        called = False
+
+        async def on_msg(
+            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
+        ) -> None:
+            nonlocal called
+            called = True
+
+        config = ListenerConfig(
+            ws_url="ws://localhost/ws", api_token="t",
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        await _handle_event(
+            "ibkr", [1, 2, 3], config, notifiers=[],
+            debounce_buf=None, db_path="/tmp/test.db",
+        )
+        self.assertFalse(called)
+
+    async def test_non_dict_int_skipped(self) -> None:
+        """A JSON integer (not a dict) is silently skipped."""
+        called = False
+
+        async def on_msg(
+            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
+        ) -> None:
+            nonlocal called
+            called = True
+
+        config = ListenerConfig(
+            ws_url="ws://localhost/ws", api_token="t",
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        await _handle_event(
+            "ibkr", 42, config, notifiers=[],
+            debounce_buf=None, db_path="/tmp/test.db",
+        )
+        self.assertFalse(called)
+
+    async def test_non_dict_none_skipped(self) -> None:
+        """A JSON null (not a dict) is silently skipped."""
+        called = False
+
+        async def on_msg(
+            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
+        ) -> None:
+            nonlocal called
+            called = True
+
+        config = ListenerConfig(
+            ws_url="ws://localhost/ws", api_token="t",
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        await _handle_event(
+            "ibkr", None, config, notifiers=[],
+            debounce_buf=None, db_path="/tmp/test.db",
+        )
+        self.assertFalse(called)
+
+    async def test_dict_still_processed(self) -> None:
+        """A proper dict still passes through to event_filter + on_message."""
+        called = False
+
+        async def on_msg(
+            data: dict[str, Any], sam: FillHandler, snm: FillHandler,
+        ) -> None:
+            nonlocal called
+            called = True
+
+        config = ListenerConfig(
+            ws_url="ws://localhost/ws", api_token="t",
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        await _handle_event(
+            "ibkr", {"type": "test"}, config, notifiers=[],
+            debounce_buf=None, db_path="/tmp/test.db",
+        )
+        self.assertTrue(called)
+
 
 # ── DebounceBuffer tests ────────────────────────────────────────────
 
