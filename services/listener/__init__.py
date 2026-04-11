@@ -127,19 +127,27 @@ def map_fill(envelope: WsEnvelope) -> Fill | None:
     contract = envelope.fill.contract
     cr = envelope.fill.commissionReport
 
+    exec_id = ex.execId.strip()
+    if not exec_id:
+        log.error(
+            "Empty execId for envelope seq=%d type=%s symbol=%s — skipping fill",
+            envelope.seq, envelope.type, contract.symbol,
+        )
+        return None
+
     # Financial enum — never assume a default for buy/sell side.
     side = _SIDE_MAP.get(ex.side)
     if side is None:
         log.error(
             "Unknown execution side %r for execId=%s — skipping fill",
-            ex.side, ex.execId,
+            ex.side, exec_id,
         )
         return None
 
     source = cast(Source, envelope.type)
 
     return Fill(
-        execId=ex.execId,
+        execId=exec_id,
         orderId=str(ex.permId),
         symbol=contract.symbol,
         assetClass=normalize_asset_class(contract.secType),
@@ -367,7 +375,11 @@ async def _listen(
         try:
             async with aiohttp.ClientSession() as session:
                 headers = {"Authorization": f"Bearer {api_token}"}
-                log.info("Connecting to bridge WS: %s", ws_url)
+                log.info(
+                    "Connecting to bridge WS: %s (last_seq=%d)",
+                    url,
+                    last_seq,
+                )
 
                 async with session.ws_connect(
                     url, headers=headers, heartbeat=30.0,

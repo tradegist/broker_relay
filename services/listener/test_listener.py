@@ -3,7 +3,7 @@
 import asyncio
 import os
 import unittest
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from listener import (
@@ -21,6 +21,7 @@ from listener.bridge_models import (
     WsCommissionReport,
     WsContract,
     WsEnvelope,
+    WsEventType,
     WsExecution,
     WsFill,
 )
@@ -146,7 +147,7 @@ def _make_envelope(
             time="20260411-10:30:00",
         )
     return WsEnvelope(
-        type=event_type,  # type: ignore[arg-type]  # tests may pass non-literal strings
+        type=cast(WsEventType, event_type),
         seq=seq,
         timestamp="2026-04-11T10:30:00+00:00",
         fill=fill,
@@ -180,6 +181,22 @@ class TestMapFill(unittest.TestCase):
         envelope = _make_envelope(has_fill=False)
         fill = map_fill(envelope)
         self.assertIsNone(fill)
+
+    def test_empty_exec_id_returns_none(self) -> None:
+        envelope = _make_envelope(exec_id="")
+        fill = map_fill(envelope)
+        self.assertIsNone(fill)
+
+    def test_whitespace_exec_id_returns_none(self) -> None:
+        envelope = _make_envelope(exec_id="   ")
+        fill = map_fill(envelope)
+        self.assertIsNone(fill)
+
+    def test_exec_id_is_stripped(self) -> None:
+        envelope = _make_envelope(exec_id="  ABC123  ")
+        fill = map_fill(envelope)
+        assert fill is not None
+        self.assertEqual(fill.execId, "ABC123")
 
     def test_fee_is_positive(self) -> None:
         envelope = _make_envelope(commission=-0.62)

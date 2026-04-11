@@ -52,7 +52,8 @@ def get_poll_interval() -> int:
 
 
 def get_meta_db_path() -> str:
-    return os.environ.get("META_DB_PATH", "/data/meta/poller.db").strip()
+    val = os.environ.get("META_DB_PATH", "").strip()
+    return val if val else "/data/meta/poller.db"
 
 
 # ---------------------------------------------------------------------------
