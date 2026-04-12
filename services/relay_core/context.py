@@ -7,8 +7,14 @@ via ``get_relay(name)`` or ``get_relays()`` without parameter threading.
     relay = get_relay("ibkr")
 """
 
+from typing import TYPE_CHECKING
 
-_relay_map: dict[str, BrokerRelay] | None = None
+from shared import RelayName
+
+if TYPE_CHECKING:
+    from relay_core import BrokerRelay
+
+_relay_map: dict[str, "BrokerRelay"] | None = None
 
 
 def init_relays(relays: list[BrokerRelay]) -> None:
