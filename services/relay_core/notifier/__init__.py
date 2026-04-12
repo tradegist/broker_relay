@@ -1,10 +1,10 @@
 """Notifier registry — load, validate, and dispatch to configured backends."""
 
 import logging
-import os
 
 from pydantic import BaseModel
 
+from ..env import get_env, get_env_int
 from .base import BaseNotifier
 from .webhook import WebhookNotifier
 
@@ -17,10 +17,7 @@ REGISTRY: dict[str, type[BaseNotifier]] = {
 
 def _get_notifiers_config(prefix: str, suffix: str) -> str:
     """Read ``{prefix}NOTIFIERS{suffix}``, falling back to ``NOTIFIERS{suffix}``."""
-    val = os.environ.get(f"{prefix}NOTIFIERS{suffix}", "").strip()
-    if val:
-        return val
-    return os.environ.get(f"NOTIFIERS{suffix}", "").strip()
+    return get_env("NOTIFIERS", prefix, suffix)
 
 
 def load_notifiers(prefix: str = "", suffix: str = "") -> list[BaseNotifier]:
@@ -72,11 +69,8 @@ def _warn_orphaned_notifier_vars(prefix: str = "", suffix: str = "") -> None:
     for name, cls in REGISTRY.items():
         orphaned: list[str] = []
         for var in cls.required_env_vars():
-            prefixed = f"{prefix}{var}{suffix}"
-            generic = f"{var}{suffix}"
-            if (os.environ.get(prefixed, "").strip()
-                    or os.environ.get(generic, "").strip()):
-                orphaned.append(prefixed if prefix else generic)
+            if get_env(var, prefix, suffix):
+                orphaned.append(f"{prefix}{var}{suffix}" if prefix else f"{var}{suffix}")
         if orphaned:
             log.warning(
                 "%s is empty but %s env vars are set: %s. "

@@ -98,6 +98,16 @@ POLL_INTERVAL=600
 
 #LISTENER_DEBOUNCE_MS=2000
 
+# ── Notification retry ───────────────────────────────────────────────
+
+# Retry attempts per notifier backend on failure (0 = no retries, max 5)
+
+#NOTIFY_RETRIES=0
+
+# Delay between retries in milliseconds (default: 1000, max: 30000)
+
+#NOTIFY_RETRY_DELAY_MS=1000
+
 # ── General ──────────────────────────────────────────────────────────
 
 TIME_ZONE=America/New_York

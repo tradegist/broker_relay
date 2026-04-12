@@ -1,10 +1,11 @@
 """Base class for all notifier backends."""
 
 import logging
-import os
 from abc import ABC, abstractmethod
 
 from pydantic import BaseModel
+
+from ..env import get_env
 
 log = logging.getLogger("notifier.base")
 
@@ -35,12 +36,9 @@ class BaseNotifier(ABC):
         """
         missing: list[str] = []
         for var in self.required_env_vars():
-            prefixed = f"{prefix}{var}{suffix}"
-            generic = f"{var}{suffix}"
-            if not (os.environ.get(prefixed, "").strip()
-                    or os.environ.get(generic, "").strip()):
+            if not get_env(var, prefix, suffix):
                 # Show the prefixed name when a prefix is active
-                missing.append(prefixed if prefix else generic)
+                missing.append(f"{prefix}{var}{suffix}" if prefix else f"{var}{suffix}")
         if missing:
             msg = f"Notifier {self.name!r} requires env vars: {', '.join(missing)}"
             log.error("%s", msg)

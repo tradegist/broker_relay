@@ -19,6 +19,7 @@ import aiohttp
 
 from relay_core.dedup import get_processed_ids, mark_processed_batch
 from relay_core.dedup import init_db as _init_dedup_db
+from relay_core.env import get_env, get_env_int
 from relay_core.notifier import notify
 from relay_core.notifier.base import BaseNotifier
 from shared import Fill, RelayName, WebhookPayloadTrades, aggregate_fills
@@ -72,29 +73,15 @@ class ListenerConfig:
 
 def is_listener_enabled(relay_name: RelayName) -> bool:
     """Check {RELAY}_LISTENER_ENABLED, falling back to LISTENER_ENABLED."""
-    prefix = relay_name.upper()
-    val = os.environ.get(f"{prefix}_LISTENER_ENABLED", "").strip().lower()
-    if not val:
-        val = os.environ.get("LISTENER_ENABLED", "").strip().lower()
+    prefix = f"{relay_name.upper()}_"
+    val = get_env("LISTENER_ENABLED", prefix).lower()
     return val not in ("0", "false", "no", "")
 
 
 def get_debounce_ms(relay_name: RelayName) -> int:
     """Read {RELAY}_LISTENER_DEBOUNCE_MS, falling back to LISTENER_DEBOUNCE_MS."""
-    prefix = relay_name.upper()
-    relay_var = f"{prefix}_LISTENER_DEBOUNCE_MS"
-    raw = os.environ.get(relay_var, "").strip()
-    if raw:
-        var_name = relay_var
-    else:
-        var_name = "LISTENER_DEBOUNCE_MS"
-        raw = os.environ.get(var_name, "0").strip()
-    try:
-        val = int(raw)
-    except ValueError:
-        raise SystemExit(
-            f"Invalid {var_name}={raw!r} — must be an integer"
-        ) from None
+    prefix = f"{relay_name.upper()}_"
+    var_name, val = get_env_int("LISTENER_DEBOUNCE_MS", prefix, default="0")
     if val < 0:
         raise SystemExit(f"Invalid {var_name}={val} — must be >= 0")
     return val

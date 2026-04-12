@@ -6,7 +6,6 @@ mark-after-notify.  Zero broker knowledge.
 """
 
 import logging
-import os
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,6 +13,7 @@ from pathlib import Path
 
 from relay_core.dedup import get_processed_ids, mark_processed_batch, prune
 from relay_core.dedup import init_db as _init_dedup_db
+from relay_core.env import get_env, get_env_int
 from relay_core.notifier import notify
 from relay_core.notifier.base import BaseNotifier
 from shared import Fill, RelayName, Trade, WebhookPayloadTrades, aggregate_fills
@@ -43,20 +43,9 @@ class PollerConfig:
 
 def get_poll_interval(relay_name: RelayName) -> int:
     """Read {RELAY}_POLL_INTERVAL, falling back to POLL_INTERVAL."""
-    prefix = relay_name.upper()
-    relay_var = f"{prefix}_POLL_INTERVAL"
-    raw = os.environ.get(relay_var, "").strip()
-    if raw:
-        var_name = relay_var
-    else:
-        var_name = "POLL_INTERVAL"
-        raw = os.environ.get(var_name, "600").strip()
-    try:
-        return int(raw)
-    except ValueError:
-        raise SystemExit(
-            f"Invalid {var_name}={raw!r} — must be an integer"
-        ) from None
+    prefix = f"{relay_name.upper()}_"
+    _, val = get_env_int("POLL_INTERVAL", prefix, default="600")
+    return val
 
 
 def is_poller_enabled(relay_name: RelayName) -> bool:
@@ -64,10 +53,8 @@ def is_poller_enabled(relay_name: RelayName) -> bool:
 
     Defaults to True (polling is on unless explicitly disabled).
     """
-    prefix = relay_name.upper()
-    val = os.environ.get(f"{prefix}_POLLER_ENABLED", "").strip().lower()
-    if not val:
-        val = os.environ.get("POLLER_ENABLED", "").strip().lower()
+    prefix = f"{relay_name.upper()}_"
+    val = get_env("POLLER_ENABLED", prefix).lower()
     if not val:
         return True
     return val not in ("0", "false", "no")

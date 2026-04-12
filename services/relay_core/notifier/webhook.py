@@ -8,6 +8,7 @@ import os
 import httpx
 from pydantic import BaseModel
 
+from ..env import get_env
 from .base import BaseNotifier
 
 log = logging.getLogger("notifier.webhook")
@@ -24,28 +25,20 @@ def get_debug_webhook_path() -> str:
     return os.environ.get("DEBUG_WEBHOOK_PATH", "").strip()
 
 
-def _get_env(var: str, prefix: str, suffix: str) -> str:
-    """Read ``{prefix}{var}{suffix}``, falling back to ``{var}{suffix}``."""
-    val = os.environ.get(f"{prefix}{var}{suffix}", "").strip()
-    if val:
-        return val
-    return os.environ.get(f"{var}{suffix}", "").strip()
-
-
 def _get_target_webhook_url(prefix: str, suffix: str) -> str:
-    return _get_env("TARGET_WEBHOOK_URL", prefix, suffix)
+    return get_env("TARGET_WEBHOOK_URL", prefix, suffix)
 
 
 def _get_webhook_secret(prefix: str, suffix: str) -> str:
-    return _get_env("WEBHOOK_SECRET", prefix, suffix)
+    return get_env("WEBHOOK_SECRET", prefix, suffix)
 
 
 def _get_webhook_header_name(prefix: str, suffix: str) -> str:
-    return _get_env("WEBHOOK_HEADER_NAME", prefix, suffix)
+    return get_env("WEBHOOK_HEADER_NAME", prefix, suffix)
 
 
 def _get_webhook_header_value(prefix: str, suffix: str) -> str:
-    return _get_env("WEBHOOK_HEADER_VALUE", prefix, suffix)
+    return get_env("WEBHOOK_HEADER_VALUE", prefix, suffix)
 
 
 def _resolve_webhook_url(prefix: str, suffix: str) -> str:
