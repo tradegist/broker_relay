@@ -12,3 +12,4 @@ terraform/*.tfplan
 *.tfvars
 **/__pycache__/
 .DS_Store
+_todo.txt

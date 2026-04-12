@@ -49,19 +49,22 @@ class OnMessageResult:
 class ListenerConfig:
     """Everything the generic WS listener engine needs from a broker adapter.
 
-    *ws_url*: WebSocket endpoint to connect to.
-    *api_token*: Bearer token for WS auth.
+    *connect*: async callback that receives an ``aiohttp.ClientSession`` and
+        returns a fully connected (and subscribed) WebSocket.  Each broker
+        owns its connection protocol (auth headers, token exchange, etc.).
     *on_message*: async callback that parses a raw WS JSON dict and returns
-        an ``OnMessageResult``. ``fill=None`` means skip; ``mark=True``
+        a list of ``OnMessageResult``.  ``fill=None`` means skip; ``mark=True``
         routes through dedup+notify+mark, ``mark=False`` is fire-and-forget.
     *event_filter*: return True if the event should be processed, False to skip.
     *debounce_ms*: milliseconds to buffer fills before flushing (0 = disabled).
     """
 
-    ws_url: str
-    api_token: str
+    connect: Callable[
+        [aiohttp.ClientSession],
+        Awaitable[aiohttp.ClientWebSocketResponse],
+    ]
     on_message: Callable[
-        [dict[str, Any]], Awaitable[OnMessageResult]
+        [dict[str, Any]], Awaitable[list[OnMessageResult]]
     ]
     event_filter: Callable[[dict[str, Any]], bool]
     debounce_ms: int = 0
@@ -285,44 +288,45 @@ async def _handle_event(
     if not config.event_filter(data):
         return
 
-    result: OnMessageResult = await config.on_message(data)
+    results: list[OnMessageResult] = await config.on_message(data)
 
-    if result.fill is None:
-        return
+    for result in results:
+        if result.fill is None:
+            continue
 
-    fill = result.fill
+        fill = result.fill
 
-    if result.mark:
-        log.info(
-            "[%s] Fill: %s %s execId=%s fee=%s",
-            relay_name, fill.side.value, fill.symbol, fill.execId, fill.fee,
-        )
-        if debounce_buf is not None:
-            await debounce_buf.add(fill)
+        if result.mark:
+            log.info(
+                "[%s] Fill: %s %s execId=%s fee=%s",
+                relay_name, fill.side.value, fill.symbol, fill.execId, fill.fee,
+            )
+            if debounce_buf is not None:
+                await debounce_buf.add(fill)
+            else:
+                try:
+                    await asyncio.to_thread(
+                        _send_and_mark, relay_name, [fill], db_path,
+                    )
+                except Exception:
+                    log.exception(
+                        "[%s] Failed to dispatch fill execId=%s",
+                        relay_name, fill.execId,
+                    )
         else:
+            log.info(
+                "[%s] Fill (no-mark): %s %s execId=%s",
+                relay_name, fill.side.value, fill.symbol, fill.execId,
+            )
             try:
                 await asyncio.to_thread(
-                    _send_and_mark, relay_name, [fill], db_path,
+                    _send_no_mark, relay_name, [fill],
                 )
             except Exception:
                 log.exception(
                     "[%s] Failed to dispatch fill execId=%s",
                     relay_name, fill.execId,
                 )
-    else:
-        log.info(
-            "[%s] Fill (no-mark): %s %s execId=%s",
-            relay_name, fill.side.value, fill.symbol, fill.execId,
-        )
-        try:
-            await asyncio.to_thread(
-                _send_no_mark, relay_name, [fill],
-            )
-        except Exception:
-            log.exception(
-                "[%s] Failed to dispatch fill execId=%s",
-                relay_name, fill.execId,
-            )
 
 
 # ── WebSocket listener loop ─────────────────────────────────────────
@@ -337,7 +341,6 @@ async def _listen(
     if config is None:
         raise RuntimeError(f"Relay {relay_name!r} has no listener configured")
 
-    last_seq = 0
     retry_delay = INITIAL_RETRY_DELAY
 
     debounce_buf: DebounceBuffer | None = None
@@ -347,26 +350,13 @@ async def _listen(
         )
 
     while True:
-        url = config.ws_url
-        if last_seq > 0:
-            sep = "&" if "?" in url else "?"
-            url = f"{url}{sep}last_seq={last_seq}"
-
         try:
             async with aiohttp.ClientSession() as session:
-                headers = {"Authorization": f"Bearer {config.api_token}"}
-                log.info(
-                    "[%s] Connecting to WS (last_seq=%d)", relay_name, last_seq,
-                )
-                log.debug("[%s] WS URL: %s", relay_name, url)
+                log.info("[%s] Connecting to WS", relay_name)
 
-                async with session.ws_connect(
-                    url, headers=headers, heartbeat=30.0,
-                ) as ws:
-                    log.info(
-                        "[%s] Connected to WS (last_seq=%d)",
-                        relay_name, last_seq,
-                    )
+                ws = await config.connect(session)
+                try:
+                    log.info("[%s] Connected to WS", relay_name)
                     retry_delay = INITIAL_RETRY_DELAY
 
                     async for msg in ws:
@@ -379,10 +369,6 @@ async def _listen(
                                     relay_name, msg.data,
                                 )
                                 continue
-
-                            seq = event_data.get("seq")
-                            if isinstance(seq, int):
-                                last_seq = seq
 
                             await _handle_event(
                                 relay_name, event_data,
@@ -401,6 +387,9 @@ async def _listen(
                                 relay_name, msg.data,
                             )
                             break
+                finally:
+                    if not ws.closed:
+                        await ws.close()
 
         except aiohttp.ClientError as exc:
             log.error("[%s] WS connection error: %s", relay_name, exc)
@@ -449,6 +438,5 @@ async def start_listener(
         "[%s] Listener starting (debounce=%dms)",
         relay_name, config.debounce_ms,
     )
-    log.debug("[%s] WS URL: %s", relay_name, config.ws_url)
 
     await _listen(relay_name, db_path)

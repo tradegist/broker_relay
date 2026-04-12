@@ -10,6 +10,8 @@ import os
 from collections.abc import Callable
 from typing import Any, cast
 
+import aiohttp
+
 from relay_core import (
     BaseNotifier,
     BrokerRelay,
@@ -208,29 +210,73 @@ def _on_message_factory(
     """Build an on_message callback with exec_events_enabled baked in."""
     async def handler(
         data: dict[str, Any],
-    ) -> OnMessageResult:
+    ) -> list[OnMessageResult]:
         event_type = data.get("type")
 
         try:
             envelope = WsEnvelope.model_validate(data)
         except Exception:
             log.exception("Failed to validate IBKR WsEnvelope (type=%s)", event_type)
-            return OnMessageResult()
+            return []
 
         fill = _map_fill(envelope)
         if fill is None:
-            return OnMessageResult()
+            return []
 
         if envelope.type == "execDetailsEvent":
             if not exec_events_enabled:
                 log.debug("Skipping execDetailsEvent (disabled)")
-                return OnMessageResult()
-            return OnMessageResult(fill=fill, mark=False)
+                return []
+            return [OnMessageResult(fill=fill, mark=False)]
 
         # commissionReportEvent — full dedup pipeline
-        return OnMessageResult(fill=fill, mark=True)
+        return [OnMessageResult(fill=fill, mark=True)]
 
     return handler
+
+
+def _build_connect(
+    ws_url: str, api_token: str,
+) -> Callable[[aiohttp.ClientSession], Any]:
+    """Build a connect callback that opens an authenticated WS connection.
+
+    Tracks ``last_seq`` across reconnects so the bridge can resume from
+    the last seen sequence number.
+    """
+    state = {"last_seq": 0}
+
+    async def connect(
+        session: aiohttp.ClientSession,
+    ) -> aiohttp.ClientWebSocketResponse:
+        url = ws_url
+        if state["last_seq"] > 0:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}last_seq={state['last_seq']}"
+
+        headers = {"Authorization": f"Bearer {api_token}"}
+        log.debug("[ibkr] WS URL: %s", url)
+        ws = await session.ws_connect(url, headers=headers, heartbeat=30.0)
+
+        # Wrap the original __anext__ to track seq numbers.
+        _orig_receive = ws.receive
+
+        async def _tracking_receive() -> aiohttp.WSMessage:
+            msg = await _orig_receive()
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                import json
+                try:
+                    data = json.loads(msg.data)
+                    seq = data.get("seq")
+                    if isinstance(seq, int):
+                        state["last_seq"] = seq
+                except Exception:
+                    pass
+            return msg
+
+        ws.receive = _tracking_receive  # type: ignore[assignment]
+        return ws
+
+    return connect
 
 
 def _build_listener_config() -> ListenerConfig | None:
@@ -241,8 +287,7 @@ def _build_listener_config() -> ListenerConfig | None:
     exec_events_enabled = _is_exec_events_enabled()
 
     return ListenerConfig(
-        ws_url=_get_bridge_ws_url(),
-        api_token=_get_bridge_api_token(),
+        connect=_build_connect(_get_bridge_ws_url(), _get_bridge_api_token()),
         on_message=_on_message_factory(exec_events_enabled),
         event_filter=_event_filter,
         debounce_ms=get_debounce_ms("ibkr"),
