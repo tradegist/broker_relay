@@ -1,14 +1,26 @@
 """Notifier registry — load, validate, and dispatch to configured backends."""
 
 import logging
+import time
 
+import httpx
 from pydantic import BaseModel
 
-from ..env import get_env, get_env_int
+from relay_core.env import get_env, get_env_int
+
 from .base import BaseNotifier
 from .webhook import WebhookNotifier
 
 log = logging.getLogger("notifier")
+
+
+class NotificationError(Exception):
+    """Raised when ALL notifier backends fail to deliver."""
+
+    def __init__(self, failures: list[tuple[str, Exception]]) -> None:
+        self.failures = failures
+        names = ", ".join(name for name, _ in failures)
+        super().__init__(f"All notifiers failed: {names}")
 
 REGISTRY: dict[str, type[BaseNotifier]] = {
     "webhook": WebhookNotifier,
@@ -113,17 +125,94 @@ def validate_notifier_env(prefix: str = "", suffix: str = "") -> bool:
     return True
 
 
-def notify(notifiers: list[BaseNotifier], payload: BaseModel) -> None:
-    """Dispatch payload to all configured notifiers."""
+def load_retry_config(prefix: str = "", suffix: str = "") -> tuple[int, int]:
+    """Read NOTIFY_RETRIES and NOTIFY_RETRY_DELAY_MS from env.
+
+    Supports relay-specific prefix (e.g. ``IBKR_NOTIFY_RETRIES``) with
+    fallback to the generic var, and multi-instance suffix (e.g. ``_2``).
+
+    Returns:
+        (retries, retry_delay_ms) tuple.
+
+    Raises:
+        SystemExit: On invalid values or out-of-range.
+    """
+    name_r, retries = get_env_int("NOTIFY_RETRIES", prefix, suffix, "0")
+    if retries < 0 or retries > 5:
+        raise SystemExit(f"Invalid {name_r}={retries} — must be 0-5")
+
+    name_d, delay_ms = get_env_int("NOTIFY_RETRY_DELAY_MS", prefix, suffix, "1000")
+    if delay_ms < 0 or delay_ms > 30000:
+        raise SystemExit(f"Invalid {name_d}={delay_ms} — must be 0-30000")
+
+    return retries, delay_ms
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Return True if the exception is worth retrying (5xx, timeout, network)."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    # Network errors, timeouts, etc. are retryable
+    return isinstance(exc, httpx.HTTPError)
+
+
+def notify(
+    notifiers: list[BaseNotifier],
+    payload: BaseModel,
+    *,
+    retries: int = 0,
+    retry_delay_ms: int = 1000,
+) -> None:
+    """Dispatch payload to all configured notifiers.
+
+    Each backend is retried up to ``retries`` times on retryable failure
+    (5xx, timeout, network error). 4xx errors are not retried.
+    If at least one backend succeeds, return normally (log warnings for failures).
+    If ALL backends fail, raise ``NotificationError`` — caller must NOT mark fills.
+    """
     if not notifiers:
         log.info("No notifiers configured — skipping notification")
         return
 
+    succeeded = 0
+    failures: list[tuple[str, Exception]] = []
+
     for notifier in notifiers:
-        try:
-            notifier.send(payload)
-        except Exception:
-            log.exception(
-                "Notifier %s failed while dispatching payload",
-                type(notifier).__name__,
+        last_exc: Exception | None = None
+        for attempt in range(1 + retries):
+            try:
+                notifier.send(payload)
+                succeeded += 1
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt < retries and _is_retryable(exc):
+                    delay_s = retry_delay_ms / 1000.0
+                    log.warning(
+                        "Notifier %s attempt %d/%d failed: %s — retrying in %.1fs",
+                        type(notifier).__name__, attempt + 1, 1 + retries,
+                        exc, delay_s,
+                    )
+                    time.sleep(delay_s)
+                else:
+                    # Non-retryable (e.g. 4xx) or last attempt — stop retrying
+                    break
+
+        if last_exc is not None:
+            log.error(
+                "Notifier %s failed after %d attempt(s): %s",
+                type(notifier).__name__, 1 + retries, last_exc,
             )
+            failures.append((type(notifier).__name__, last_exc))
+
+    if succeeded == 0:
+        raise NotificationError(failures)
+
+    if failures:
+        names = ", ".join(name for name, _ in failures)
+        log.warning(
+            "%d/%d notifier(s) failed: %s — fills will be marked processed"
+            " (partial success)",
+            len(failures), len(notifiers), names,
+        )
