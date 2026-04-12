@@ -80,7 +80,7 @@ class TestParseExecutions(unittest.TestCase):
         self.assertEqual(errors, [])
 
     def test_data_not_list_appends_error(self) -> None:
-        msg = {"channel": "executions", "data": "bad"}  # type: ignore[typeddict-item]
+        msg = {"channel": "executions", "data": "bad"}
         fills, errors = parse_executions(msg)  # type: ignore[arg-type]
         self.assertEqual(fills, [])
         self.assertEqual(len(errors), 1)
@@ -93,7 +93,7 @@ class TestParseExecutions(unittest.TestCase):
         self.assertEqual(errors, [])
 
     def test_non_dict_item_appends_error(self) -> None:
-        msg = {"channel": "executions", "data": ["not-a-dict"]}  # type: ignore[typeddict-item]
+        msg = {"channel": "executions", "data": ["not-a-dict"]}
         fills, errors = parse_executions(msg)  # type: ignore[arg-type]
         self.assertEqual(fills, [])
         self.assertEqual(len(errors), 1)

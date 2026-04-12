@@ -205,7 +205,8 @@ class TestBuildParse(unittest.TestCase):
     """Test the parse callable returned by _build_parse()."""
 
     def _parse(self, trades: dict[str, Any]) -> tuple[list[Any], list[str]]:
-        return _build_parse()(json.dumps({"trades": trades}))
+        result: tuple[list[Any], list[str]] = _build_parse()(json.dumps({"trades": trades}))
+        return result
 
     def test_valid_trade_returns_fill(self) -> None:
         fills, errors = self._parse({"T1": _make_rest_trade()})
