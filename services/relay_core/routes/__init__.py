@@ -57,13 +57,31 @@ async def handle_poll(request: web.Request) -> web.Response:
              f"(relay {relay_name!r} has {len(relay.poller_configs)})"}, status=404,
         )
 
-    # Parse optional overrides from body
+    # Parse optional replay count from body
     replay = 0
-    try:
-        body = await request.json()
-        replay = int(body.get("replay") or 0)
-    except Exception:
-        pass  # no body or malformed — use env defaults
+    if request.body_exists:
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response(
+                {"error": "Request body must be valid JSON"}, status=400,
+            )
+        if not isinstance(body, dict):
+            return web.json_response(
+                {"error": "Request body must be a JSON object"}, status=400,
+            )
+        raw_replay = body.get("replay")
+        if raw_replay is not None:
+            try:
+                replay = int(raw_replay)
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": f"Invalid replay value: {raw_replay!r}"}, status=400,
+                )
+            if replay < 0:
+                return web.json_response(
+                    {"error": "replay must be >= 0"}, status=400,
+                )
 
     # Acquire the per-poller lock (fail-fast if already running)
     poll_lock = relay.poll_locks[poll_idx] if relay.poll_locks else None
@@ -84,9 +102,9 @@ async def handle_poll(request: web.Request) -> web.Response:
 
         resp = RunPollResponse(trades=trades)
         return web.json_response(resp.model_dump())
-    except Exception as exc:
+    except Exception:
         log.exception("On-demand poll failed for relay %s poller %s", relay_name, poll_idx_raw)
-        return web.json_response({"error": str(exc)}, status=500)
+        return web.json_response({"error": "Internal server error"}, status=500)
     finally:
         if poll_lock is not None:
             poll_lock.release()

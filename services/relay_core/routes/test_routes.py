@@ -158,7 +158,7 @@ class TestPollHandler(AioHTTPTestCase):
         )
         self.assertEqual(resp.status, 500)
         body = await resp.json()
-        self.assertIn("boom", body["error"])
+        self.assertEqual(body["error"], "Internal server error")
 
     @patch.dict(os.environ, {"API_TOKEN": _TEST_TOKEN})
     async def test_poll_idx_out_of_bounds(self) -> None:
@@ -169,6 +169,73 @@ class TestPollHandler(AioHTTPTestCase):
         self.assertEqual(resp.status, 404)
         body = await resp.json()
         self.assertIn("not configured", body["error"].lower())
+
+
+class TestPollReplayValidation(AioHTTPTestCase):
+    """Replay body parameter validation (CR regression tests)."""
+
+    async def get_application(self) -> web.Application:
+        return create_app([_make_relay()])
+
+    @patch.dict(os.environ, {"API_TOKEN": _TEST_TOKEN})
+    async def test_replay_non_numeric_returns_400(self) -> None:
+        """Invalid replay like 'abc' must not silently become 0."""
+        resp = await self.client.request(
+            "POST", "/relays/ibkr/poll/1",
+            headers={"Authorization": f"Bearer {_TEST_TOKEN}"},
+            data=json.dumps({"replay": "abc"}),
+        )
+        self.assertEqual(resp.status, 400)
+        body = await resp.json()
+        self.assertIn("replay", body["error"].lower())
+
+    @patch.dict(os.environ, {"API_TOKEN": _TEST_TOKEN})
+    async def test_replay_negative_returns_400(self) -> None:
+        """Negative replay must be rejected."""
+        resp = await self.client.request(
+            "POST", "/relays/ibkr/poll/1",
+            headers={"Authorization": f"Bearer {_TEST_TOKEN}"},
+            data=json.dumps({"replay": -3}),
+        )
+        self.assertEqual(resp.status, 400)
+        body = await resp.json()
+        self.assertIn(">= 0", body["error"])
+
+    @patch.dict(os.environ, {"API_TOKEN": _TEST_TOKEN})
+    async def test_malformed_json_body_returns_400(self) -> None:
+        """Non-JSON body must return 400, not be silently ignored."""
+        resp = await self.client.request(
+            "POST", "/relays/ibkr/poll/1",
+            headers={"Authorization": f"Bearer {_TEST_TOKEN}"},
+            data="not json",
+        )
+        self.assertEqual(resp.status, 400)
+        body = await resp.json()
+        self.assertIn("valid JSON", body["error"])
+
+    @patch.dict(os.environ, {"API_TOKEN": _TEST_TOKEN})
+    async def test_json_array_body_returns_400(self) -> None:
+        """JSON body that is not an object must return 400."""
+        resp = await self.client.request(
+            "POST", "/relays/ibkr/poll/1",
+            headers={"Authorization": f"Bearer {_TEST_TOKEN}"},
+            data=json.dumps([1, 2, 3]),
+        )
+        self.assertEqual(resp.status, 400)
+        body = await resp.json()
+        self.assertIn("JSON object", body["error"])
+
+    @patch.dict(os.environ, {"API_TOKEN": _TEST_TOKEN})
+    @patch("relay_core.routes.poll_once")
+    async def test_no_body_defaults_replay_zero(self, mock_poll: MagicMock) -> None:
+        """POST with no body should still work with replay=0."""
+        mock_poll.return_value = []
+        resp = await self.client.request(
+            "POST", "/relays/ibkr/poll/1",
+            headers={"Authorization": f"Bearer {_TEST_TOKEN}"},
+        )
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(mock_poll.call_args.kwargs.get("replay"), 0)
 
 
 class TestPollNoPollers(AioHTTPTestCase):
