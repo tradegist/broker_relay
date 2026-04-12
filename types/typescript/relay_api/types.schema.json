@@ -78,7 +78,9 @@
           "enum": [
             "flex",
             "execDetailsEvent",
-            "commissionReportEvent"
+            "commissionReportEvent",
+            "rest_poll",
+            "ws_execution"
           ],
           "type": "string"
         },
