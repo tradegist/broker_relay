@@ -27,7 +27,7 @@ export interface Trade {
   fillCount: number;
   execIds: string[];
   timestamp: string;
-  source: "flex" | "execDetailsEvent" | "commissionReportEvent";
+  source: "flex" | "execDetailsEvent" | "commissionReportEvent" | "rest_poll" | "ws_execution";
   raw: {
     [k: string]: unknown;
   };

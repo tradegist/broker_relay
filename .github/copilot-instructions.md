@@ -4,7 +4,7 @@
 
 Broker Relay is a **relay between broker accounts** that provides clear, common interfaces to communicate with different brokers through a single interface layer.
 
-- **Currently supports:** IBKR broker only (more brokers planned via the relay adapter pattern)
+- **Currently supports:** IBKR (Interactive Brokers) and Kraken (crypto exchange), with more brokers planned via the relay adapter pattern
 - **Currently provides:** Webhook push notifications (more notification layers planned)
 - **Current direction:** Broker → User (trade fill events). Future: User → Broker (order placement)
 
@@ -150,18 +150,55 @@ Three Docker containers in a single Compose stack on a DigitalOcean droplet (deb
 
 The `relays` container uses a **registry pattern** to support multiple broker adapters:
 
-1. `RELAYS` env var lists active relays (e.g. `RELAYS=ibkr`).
+1. `RELAYS` env var lists active relays (e.g. `RELAYS=ibkr`, `RELAYS=ibkr,kraken`).
 2. `registry.py` validates each name against `RelayName` (a `Literal` type in `shared/models.py`).
 3. For each relay, the registry dynamically imports `relays.<name>` and calls `build_relay()`.
 4. The adapter returns a `BrokerRelay` dataclass with `PollerConfig`s, `ListenerConfig`, and notifiers.
 5. `main.py` starts a poll loop per `PollerConfig` and a WS listener (if configured).
 
-**Adding a new broker:**
+**Adding a new broker relay — step-by-step:**
 
-1. Add the name to `RelayName` in `services/shared/models.py`.
-2. Create `services/relays/<name>/__init__.py` with a `build_relay(notifiers) -> BrokerRelay` function.
-3. Add the relay's prefixed env vars to `.env.relays`.
-4. Register the module in `pyproject.toml`, Makefile (`lint:`, `typecheck:`), and `.dockerignore`.
+Use the existing `ibkr` and `kraken` relays as reference implementations. IBKR demonstrates a complex adapter (XML polling + bridge WS with two event types), while Kraken demonstrates a simpler adapter (JSON REST polling + native WS with token-based auth).
+
+1. **Update shared types** (`services/shared/models.py`):
+   - Add the relay name to `RelayName` (e.g. `Literal["ibkr", "kraken", "newbroker"]`).
+   - Add any new source identifiers to `Source` (e.g. `"newbroker_rest"`, `"newbroker_ws"`).
+
+2. **Create the relay adapter package** (`services/relays/<name>/`):
+   - `__init__.py` — must export `build_relay(notifiers: list[BaseNotifier]) -> BrokerRelay`. This is the only contract the registry requires.
+   - Add broker-specific TypedDicts for raw API shapes (e.g. `<name>_types.py`).
+   - Add a REST client if the broker has a REST API (e.g. `rest_client.py`).
+   - Add a WS parser if the broker has a WebSocket API (e.g. `ws_parser.py`).
+
+3. **Implement `build_relay()`** — it must return a `BrokerRelay` with:
+   - `name`: the relay name (must match `RelayName`).
+   - `notifiers`: pass through from the argument.
+   - `poller_configs`: list of `PollerConfig` (can be empty if listener-only). Each needs:
+     - `fetch: Callable[[], str | None]` — returns raw data (JSON string, XML, etc.) or None on failure.
+     - `parse: Callable[[str], tuple[list[Fill], list[str]]]` — parses raw data into (fills, errors).
+     - `interval: int` — poll interval in seconds.
+   - `listener_config`: a `ListenerConfig` or `None` (can be None if poller-only). Needs:
+     - `connect: Callable[[aiohttp.ClientSession], Awaitable[aiohttp.ClientWebSocketResponse]]` — async callback that connects, authenticates, subscribes, and returns a ready-to-read websocket. The engine handles reconnection with exponential backoff; this callback is called on each reconnect.
+     - `on_message: Callable[[dict], Awaitable[list[OnMessageResult]]]` — parses a WS JSON dict into a list of `OnMessageResult`. Each result has `fill` (or None to skip) and `mark` (True for dedup+notify+mark pipeline, False for fire-and-forget).
+     - `event_filter: Callable[[dict], bool]` — return True for events that should reach `on_message`, False to skip (heartbeats, subscription acks, etc.).
+     - `debounce_ms: int` — optional debounce buffer (0 = disabled).
+
+4. **Environment variables** — follow the prefix convention:
+   - Use `{RELAY}_` prefix for all relay-specific vars (e.g. `KRAKEN_API_KEY`).
+   - Use `relay_core.env.get_env()` / `get_env_int()` for vars that support prefix fallback.
+   - Use direct `os.environ.get()` wrapped in getter functions for broker-specific vars with no generic equivalent.
+   - Add the vars to `env_examples/env.relays` (the template file) — this is **mandatory**. Follow the existing relay sections as a model: uncomment required vars, comment out optional ones with their defaults. Document in the README.
+
+5. **Register the module**:
+   - `pyproject.toml`: add to `tool.pytest.ini_options.testpaths`, `tool.ruff.src`, `tool.ruff.lint.isort.known-first-party`.
+   - Makefile: add to `lint:` and `typecheck:` targets.
+   - `.dockerignore`: add `!services/relays/<name>/**` if needed (currently `!services/relays/**` covers all relay packages).
+
+6. **Write tests** — colocate unit tests next to the source files (e.g. `test_<name>.py`).
+
+7. **Update README** — add the relay's env vars, webhook payload examples, and any broker-specific setup instructions.
+
+8. **Verify** — `make test`, `make typecheck`, `make lint` must all pass.
 
 ### Env file flow
 
@@ -321,14 +358,14 @@ services/relay_core/
 - **`services/relay_core/main.py`** reads `RELAYS`, loads adapters via the registry, initialises the relay context (`init_relays()`), starts the HTTP API, then spawns a poll loop per `PollerConfig` and a WS listener per relay (if configured). When `RELAYS` is empty, the API server starts alone (for health checks).
 - **`services/relay_core/context.py`** provides the relay context singleton. `init_relays(relays)` is called once at startup by `amain()`, then `get_relay(name)` and `get_relays()` are available anywhere to access relay config (notifiers, retry config, poller/listener configs) without parameter threading. `_reset()` is exposed for test teardown. Uses `TYPE_CHECKING` guard for `BrokerRelay` import to avoid circular import with `__init__.py`.
 - **`services/relay_core/poller_engine.py`** provides `poll_once(relay_name, poller_index)` — the generic polling function. Resolves `PollerConfig`, notifiers, and retry config from the relay context. Handles dedup, aggregation, notify, and mark. Broker-specific logic (Flex fetch, XML parsing) lives in the relay adapter.
-- **`services/relay_core/listener_engine.py`** provides `start_listener(relay_name)` — the generic WS listener. Resolves `ListenerConfig`, notifiers, and retry config from the relay context. Connects to a broker bridge's WebSocket, dispatches events to the adapter's `on_message` callback, handles dedup + notify + mark, and auto-reconnects with exponential backoff.
+- **`services/relay_core/listener_engine.py`** provides `start_listener(relay_name)` — the generic WS listener. Resolves `ListenerConfig`, notifiers, and retry config from the relay context. Calls the adapter's `connect` callback to obtain a connected websocket, dispatches events via `event_filter` and `on_message` callbacks, handles dedup + notify + mark, and auto-reconnects with exponential backoff. The `connect` callback owns the entire connection protocol (auth, subscription) — the engine only manages the message loop and reconnection.
 - **`services/relay_core/relay_models.py`** is a re-export shim for shared models plus relay-specific API types (`RunPollResponse`, `HealthResponse`). Listed in `schema_gen.py:SCHEMA_MODELS`.
 - **`services/relay_core/routes/__init__.py`** provides `GET /health` (unauthenticated) and `POST /relays/{relay_name}/poll/{poll_idx}` (authenticated, 1-based index).
 - **`services/relay_core/env.py`** provides `get_env(var, prefix, suffix, default)` and `get_env_int(var, prefix, suffix, default)` — shared helpers for reading env vars with relay-specific prefix fallback. Resolution order: `{prefix}{var}{suffix}` → `{var}{suffix}` → `default`. All relay-core env var readers (`get_poll_interval`, `get_debounce_ms`, `load_retry_config`, notifier env loading) use these helpers. When adding new env var readers, use `get_env` / `get_env_int` from `relay_core.env` instead of writing inline `os.environ.get()` with manual fallback logic.
 
 ## Relay Adapter Structure
 
-Each broker adapter lives under `services/relays/<name>/`. The adapter is a single-file (or small package) integration that wires broker-specific logic into the generic `relay_core` engines.
+Each broker adapter lives under `services/relays/<name>/`. The adapter is a small package that wires broker-specific logic into the generic `relay_core` engines. The only required contract is `build_relay(notifiers: list[BaseNotifier]) -> BrokerRelay`.
 
 ```
 services/relays/ibkr/
@@ -338,11 +375,38 @@ services/relays/ibkr/
   flex_parser.py           # Flex XML parser (Activity + Trade Confirmation)
   test_flex_parser.py      # Tests for flex_parser
   test_ibkr.py             # Tests for IBKR adapter logic
+
+services/relays/kraken/
+  __init__.py              # build_relay() → BrokerRelay, env getters, REST poller + WS listener adapters
+  rest_client.py           # KrakenClient: HMAC-SHA512 auth, get_trades_history(), get_ws_token()
+  ws_parser.py             # WS v2 executions channel parser → list[Fill]
+  kraken_types.py          # TypedDicts for raw Kraken API shapes (WS + REST)
 ```
 
-- **`build_relay(notifiers)`** constructs a `BrokerRelay` with IBKR-specific `PollerConfig`s (Flex fetch + parse callbacks) and an optional `ListenerConfig` (bridge WS URL + `on_message` callback).
+### IBKR adapter
+
+- **`build_relay(notifiers)`** constructs a `BrokerRelay` with IBKR-specific `PollerConfig`s (Flex fetch + parse callbacks) and an optional `ListenerConfig` (ibkr_bridge WS with bearer token auth).
 - **Multi-account support** via `_2` suffixed env vars (e.g. `IBKR_FLEX_QUERY_ID_2`). Each suffix produces an additional `PollerConfig` within the same relay — no separate container needed. Triggered via `make poll RELAY=ibkr IDX=2` or `POST /relays/ibkr/poll/2`.
 - **Relay-specific overrides** — env vars like `IBKR_NOTIFIERS`, `IBKR_TARGET_WEBHOOK_URL` override the generic equivalents for the IBKR relay only, allowing different webhook destinations per broker.
+- **Listener connect callback** — provides a closure that adds bearer token auth headers and tracks `last_seq` for event resumption across reconnects.
+
+### Kraken adapter
+
+- **`build_relay(notifiers)`** constructs a `BrokerRelay` with a Kraken REST poller (TradesHistory endpoint) and an optional WS v2 listener (executions channel).
+- **Poller** — `KrakenClient.get_trades_history()` returns JSON; the parse callback maps each trade via `_parse_rest_trade()` into a `Fill` with `source="rest_poll"`.
+- **Listener** — the `connect` callback obtains a short-lived WS token via REST (`GetWebSocketsToken`), opens a websocket to `wss://ws-auth.kraken.com/v2`, sends a subscription message for the `executions` channel, and returns the ready websocket. The `on_message` callback uses `ws_parser.parse_executions()` to extract multiple fills per message with `source="ws_execution"`.
+- **All asset classes are `"crypto"`** — Kraken is a crypto-only exchange.
+
+### Fee normalisation convention (apply to all relay adapters)
+
+When mapping a broker fill to a `Fill` model, use this priority order for the `fee` field:
+
+1. **Prefer a pre-converted equivalent field** if the broker provides one (e.g. Kraken's `fee_usd_equiv`). It is always meaningful regardless of how many fee currencies are involved.
+2. **Single-asset fallback** — if the broker provides a `fees` array, only aggregate entries when every entry shares the same `asset`. Summing across different assets (e.g. USD + BTC) produces a number in no real currency; return `0.0` instead.
+3. **`abs()` per entry, not on the total** — fee quantities may be signed. Apply `abs(qty)` to each entry before summing, not `abs(sum(...))` at the end. `abs(-5 + 3) = 2` understates the true fee; `abs(-5) + abs(3) = 8` is correct.
+4. Return `0.0` when no fee information is available.
+
+See `services/relays/kraken/ws_parser.py` (`_extract_fee`) for the reference implementation.
 
 ## Notifier Package
 
@@ -578,6 +642,11 @@ services/                  # Business-logic services
       bridge_models.py     # Mirrored WsEnvelope types from ibkr_bridge
       flex_fetch.py        # Flex Web Service two-step fetch
       flex_parser.py       # Flex XML parser (Activity + Trade Confirmation)
+    kraken/                # Kraken crypto exchange adapter
+      __init__.py          # build_relay(), env getters, REST poller + WS listener
+      rest_client.py       # KrakenClient: HMAC-SHA512 auth, trades history, WS token
+      ws_parser.py         # WS v2 executions channel parser
+      kraken_types.py      # TypedDicts for raw Kraken API shapes
   shared/                  # Shared models and utilities (library, no container)
     __init__.py            # Barrel: re-exports models + utilities
     models.py              # Pydantic models (Fill, Trade, WebhookPayload, BuySell, RelayName)

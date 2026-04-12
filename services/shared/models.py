@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-RelayName = Literal["ibkr"]
+RelayName = Literal["ibkr", "kraken"]
 """Allowed relay identifiers — single source of truth.
 
 Used to validate RELAYS env var, discriminate webhook payloads, and
@@ -30,11 +30,14 @@ class BuySell(str, Enum):
     SELL = "sell"
 
 
-Source = Literal["flex", "execDetailsEvent", "commissionReportEvent"]
+Source = Literal[
+    "flex", "execDetailsEvent", "commissionReportEvent",  # IBKR
+    "rest_poll", "ws_execution",                           # Kraken
+]
 
 
 class Fill(BaseModel):
-    """Individual execution from IBKR (CommonFill spec)."""
+    """Individual execution from a broker (CommonFill spec)."""
 
     model_config = ConfigDict(extra="forbid")
 

@@ -6,16 +6,17 @@
  */
 
 export type TypesSchema = WebhookPayloadTrades | Trade | Fill;
+export type RelayName = "ibkr" | "kraken";
 export type AssetClass = "crypto" | "equity" | "forex" | "future" | "option" | "other";
 export type BuySell = "buy" | "sell";
 export type OrderType = "limit" | "market" | "stop" | "stop_limit" | "trailing_stop";
-export type Source = "commissionReportEvent" | "execDetailsEvent" | "flex";
+export type Source = "commissionReportEvent" | "execDetailsEvent" | "flex" | "rest_poll" | "ws_execution";
 
 /**
  * Webhook payload for trade execution events.
  */
 export interface WebhookPayloadTrades {
-  relay: "ibkr";
+  relay: RelayName;
   type: "trades";
   data: Trade[];
   errors: string[];
@@ -42,7 +43,7 @@ export interface Trade {
   };
 }
 /**
- * Individual execution from IBKR (CommonFill spec).
+ * Individual execution from a broker (CommonFill spec).
  */
 export interface Fill {
   execId: string;

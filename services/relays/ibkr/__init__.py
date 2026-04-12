@@ -7,8 +7,10 @@ env var getters, Flex fetch, XML parsing, WS envelope mapping.
 
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
+
+import aiohttp
 
 from relay_core import (
     BaseNotifier,
@@ -16,16 +18,18 @@ from relay_core import (
     ListenerConfig,
     OnMessageResult,
     PollerConfig,
+    StartupContext,
     get_debounce_ms,
     get_poll_interval,
     is_listener_enabled,
     is_poller_enabled,
 )
-from shared import BuySell, Fill, Source, normalize_asset_class
+from shared import BuySell, Fill, Source
 
 from .bridge_models import WsEnvelope
-from .flex_fetch import fetch_flex_report
+from .flex_fetch import _RedactTokenFilter, fetch_flex_report
 from .flex_parser import parse_fills
+from .utilities import normalize_asset_class
 
 log = logging.getLogger("relays.ibkr")
 
@@ -204,33 +208,83 @@ def _event_filter(data: dict[str, Any]) -> bool:
 
 def _on_message_factory(
     exec_events_enabled: bool,
-) -> Any:
+) -> Callable[[dict[str, Any]], Awaitable[list[OnMessageResult]]]:
     """Build an on_message callback with exec_events_enabled baked in."""
     async def handler(
         data: dict[str, Any],
-    ) -> OnMessageResult:
+    ) -> list[OnMessageResult]:
         event_type = data.get("type")
 
         try:
             envelope = WsEnvelope.model_validate(data)
         except Exception:
             log.exception("Failed to validate IBKR WsEnvelope (type=%s)", event_type)
-            return OnMessageResult()
+            return []
 
         fill = _map_fill(envelope)
         if fill is None:
-            return OnMessageResult()
+            return []
 
         if envelope.type == "execDetailsEvent":
             if not exec_events_enabled:
                 log.debug("Skipping execDetailsEvent (disabled)")
-                return OnMessageResult()
-            return OnMessageResult(fill=fill, mark=False)
+                return []
+            return [OnMessageResult(fill=fill, mark=False)]
 
         # commissionReportEvent — full dedup pipeline
-        return OnMessageResult(fill=fill, mark=True)
+        return [OnMessageResult(fill=fill, mark=True)]
 
     return handler
+
+
+def _build_connect(
+    ws_url: str, api_token: str,
+) -> Callable[[aiohttp.ClientSession], Awaitable[aiohttp.ClientWebSocketResponse]]:
+    """Build a connect callback that opens an authenticated WS connection.
+
+    Tracks ``last_seq`` across reconnects so the bridge can resume from
+    the last seen sequence number.
+    """
+    state = {"last_seq": 0}
+
+    async def connect(
+        session: aiohttp.ClientSession,
+    ) -> aiohttp.ClientWebSocketResponse:
+        url = ws_url
+        if state["last_seq"] > 0:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}last_seq={state['last_seq']}"
+
+        headers = {"Authorization": f"Bearer {api_token}"}
+        log.debug("[ibkr] WS URL: %s", url)
+        ws = await session.ws_connect(url, headers=headers, heartbeat=30.0)
+
+        # Wrap the original receive method to track seq numbers.
+        _orig_receive = ws.receive
+
+        async def _tracking_receive() -> aiohttp.WSMessage:
+            msg = await _orig_receive()
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                import json
+                try:
+                    data = json.loads(msg.data)
+                    seq = data.get("seq")
+                    if isinstance(seq, int):
+                        state["last_seq"] = seq
+                except (ValueError, TypeError) as exc:
+                    log.debug("[ibkr] Could not parse seq from WS message: %s", exc)
+            return msg
+
+        # `receive` is a regular async method on ClientWebSocketResponse (no
+        # __slots__), so attribute assignment is safe at runtime.  We patch at
+        # this level — rather than inside on_message — so that seq is tracked
+        # for every incoming WS message, including status events
+        # ("connected"/"disconnected") that event_filter discards before
+        # on_message is invoked.
+        ws.receive = _tracking_receive  # type: ignore[assignment] # aiohttp stubs mark receive as non-assignable; runtime monkey-patch is intentional
+        return ws
+
+    return connect
 
 
 def _build_listener_config() -> ListenerConfig | None:
@@ -241,12 +295,18 @@ def _build_listener_config() -> ListenerConfig | None:
     exec_events_enabled = _is_exec_events_enabled()
 
     return ListenerConfig(
-        ws_url=_get_bridge_ws_url(),
-        api_token=_get_bridge_api_token(),
+        connect=_build_connect(_get_bridge_ws_url(), _get_bridge_api_token()),
         on_message=_on_message_factory(exec_events_enabled),
         event_filter=_event_filter,
         debounce_ms=get_debounce_ms("ibkr"),
     )
+
+
+# ── Startup lifecycle ────────────────────────────────────────────────
+
+
+def _on_start(ctx: StartupContext) -> None:
+    ctx.add_logging_filter(_RedactTokenFilter())
 
 
 # ── Public API ───────────────────────────────────────────────────────
@@ -273,4 +333,5 @@ def build_relay(notifiers: list[BaseNotifier]) -> BrokerRelay:
         notifiers=notifiers,
         poller_configs=poller_configs,
         listener_config=listener_config,
+        on_start=_on_start,
     )

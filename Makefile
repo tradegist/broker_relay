@@ -55,7 +55,10 @@ sync: ## Push .env + restart (S=service B=1 LOCAL_FILES=1 SKIP_E2E=1 ENV=local)
 	fi
 
 poll: ## Trigger an immediate poll (RELAY=ibkr, IDX=1, V=1 verbose, REPLAY=N resend)
-	$(CLI_RELAY_ENV) $(PYTHON) -m cli poll $(or $(RELAY),ibkr) $(or $(IDX),1) $(if $(V),-v) $(if $(REPLAY),--replay $(REPLAY))
+	@relay="$(RELAY)"; \
+	if [ -z "$$relay" ]; then relay=$$(. ./.env 2>/dev/null; echo "$${RELAYS%%,*}"); fi; \
+	relay=$${relay:-ibkr}; \
+	$(CLI_RELAY_ENV) $(PYTHON) -m cli poll $$relay $(or $(IDX),1) $(if $(V),-v) $(if $(REPLAY),--replay $(REPLAY))
 
 test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2] [ENV=local])
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli test-webhook $(S)
