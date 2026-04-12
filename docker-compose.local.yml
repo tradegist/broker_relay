@@ -15,7 +15,7 @@ services:
       - ./services/shared:/app/shared:ro
       - ./services/listener:/app/listener:ro
 
-  ibkr-debug:
+  debug:
     ports:
       - "15003:9000"
     volumes:
@@ -26,4 +26,4 @@ services:
 
 networks:
   default:
-    name: ibkr-relay-local
+    name: broker-relay-local

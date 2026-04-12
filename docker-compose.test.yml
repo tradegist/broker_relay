@@ -40,7 +40,7 @@ services:
       retries: 20
       start_period: 5s
 
-  ibkr-debug:
+  debug:
     restart: "no"
     deploy:
       replicas: 1
@@ -69,4 +69,4 @@ services:
 
 networks:
   default:
-    name: ibkr-relay-test
+    name: broker-relay-test

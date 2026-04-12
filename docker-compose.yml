@@ -1,4 +1,4 @@
-name: ibkr-relay
+name: broker-relay
 
 services:
   caddy:
@@ -61,7 +61,7 @@ services:
       - dedup-data:/data/dedup
       - relay-meta:/data/meta
 
-  ibkr-debug:
+  debug:
     build:
       context: .
       dockerfile: services/debug/Dockerfile

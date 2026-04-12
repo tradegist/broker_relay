@@ -108,7 +108,7 @@ class TestResolveWebhookUrl:
         env = {"DEBUG_WEBHOOK_PATH": "abc123", "TARGET_WEBHOOK_URL": "https://original.com", "WEBHOOK_SECRET": "s"}
         with patch.dict("os.environ", env, clear=True):
             notifier = WebhookNotifier()
-        assert notifier._url == "http://ibkr-debug:9000/debug/webhook/abc123"
+        assert notifier._url == "http://debug:9000/debug/webhook/abc123"
 
     def test_no_debug_path_uses_target_url(self) -> None:
         env = {"TARGET_WEBHOOK_URL": "https://original.com/hook", "WEBHOOK_SECRET": "s"}
@@ -142,7 +142,7 @@ class TestValidation:
         env = {"DEBUG_WEBHOOK_PATH": "abc123", "WEBHOOK_SECRET": "s"}
         with patch.dict("os.environ", env, clear=True):
             notifier = WebhookNotifier()
-        assert "ibkr-debug" in notifier._url
+        assert "debug:9000" in notifier._url
 
     def test_missing_target_url_without_debug_exits(self) -> None:
         """TARGET_WEBHOOK_URL is required when DEBUG_WEBHOOK_PATH is not set."""
@@ -156,4 +156,4 @@ class TestValidation:
         env = {"DEBUG_WEBHOOK_PATH": "xyz", "TARGET_WEBHOOK_URL_2": "https://other.com", "WEBHOOK_SECRET_2": "s"}
         with patch.dict("os.environ", env, clear=True):
             notifier = WebhookNotifier(suffix="_2")
-        assert notifier._url == "http://ibkr-debug:9000/debug/webhook/xyz"
+        assert notifier._url == "http://debug:9000/debug/webhook/xyz"

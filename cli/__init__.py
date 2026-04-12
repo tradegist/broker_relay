@@ -1,6 +1,6 @@
-"""IBKR Webhook Relay CLI — project-specific configuration.
+"""Broker Relay CLI — project-specific configuration.
 
-Sets up CoreConfig and exposes IBKR-specific helpers used by
+Sets up CoreConfig and exposes project-specific helpers used by
 project-specific commands (poll, test_webhook).
 """
 
@@ -15,11 +15,11 @@ from cli.core import CoreConfig, die, env, set_config
 from notifier import validate_notifier_env
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
-PROJECT_NAME = "ibkr-relay"
+PROJECT_NAME = "broker-relay"
 REMOTE_DIR = f"/opt/{PROJECT_NAME}"
 
 
-# ── IBKR-specific helpers ───────────────────────────────────────────
+# ── Project-specific helpers ─────────────────────────────────────────
 
 
 def _compose_env():
@@ -84,7 +84,7 @@ def relay_api(path, method="POST", data=None):
             die(f"Request failed ({e.code}): {content}")
 
 
-# ── CoreConfig for IBKR project ────────────────────────────────────
+# ── CoreConfig for Broker Relay project ──────────────────────────────
 
 _CONFIG = CoreConfig(
     project_name=PROJECT_NAME,
@@ -102,8 +102,7 @@ _CONFIG = CoreConfig(
     service_map={
         "caddy": "caddy",
         "relays": "relays",
-        "debug": "ibkr-debug",
-        "ibkr-debug": "ibkr-debug",
+        "debug": "debug",
     },
     compose_env_fn=_compose_env,
     size_selector_fn=_droplet_size,

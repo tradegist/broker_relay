@@ -60,5 +60,5 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = [
     "notifier", "shared", "dedup", "debug", "listener",
-    "relay_core", "relay_models", "relays", "ibkr_relay_types",
+    "relay_core", "relay_models", "relays", "broker_relay_types",
 ]

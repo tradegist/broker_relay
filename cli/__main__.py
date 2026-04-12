@@ -15,7 +15,7 @@ _PROJECT_MODULES: dict[str, str] = {
 
 def main():
     parser = argparse.ArgumentParser(
-        description="IBKR Webhook Relay CLI",
+        description="Broker Relay CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command")

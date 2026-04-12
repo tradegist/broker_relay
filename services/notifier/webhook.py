@@ -12,7 +12,7 @@ from .base import BaseNotifier
 
 log = logging.getLogger("notifier.webhook")
 
-_DEBUG_SERVICE_NAME = "ibkr-debug"
+_DEBUG_SERVICE_NAME = "debug"
 _DEBUG_SERVICE_PORT = 9000
 
 

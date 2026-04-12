@@ -1,6 +1,6 @@
 .PHONY: setup deploy destroy pause resume sync poll test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
 
-PROJECT = ibkr-relay
+PROJECT = broker-relay
 PYTHON ?= .venv/bin/python3
 E2E_ENV = .env.test
 E2E_COMPOSE = docker compose -f docker-compose.yml -f docker-compose.test.yml -p $(PROJECT)-test --env-file $(E2E_ENV)
@@ -67,10 +67,10 @@ typecheck: ## Run mypy strict type checking
 	MYPYPATH=services/debug $(PYTHON) -m mypy services/debug/
 	$(PYTHON) -m mypy schema_gen.py
 	$(PYTHON) -m mypy gen_python_types.py
-	$(PYTHON) -m mypy types/python/ibkr_relay_types/
+	$(PYTHON) -m mypy types/python/broker_relay_types/
 
 lint: ## Run ruff linter (use FIX=1 to auto-fix)
-	$(PYTHON) -m ruff check services/notifier/ services/dedup/ services/shared/ services/listener/ services/relay_core/ services/relays/ services/debug/ cli/ schema_gen.py gen_python_types.py types/python/ibkr_relay_types/ $(if $(FIX),--fix)
+	$(PYTHON) -m ruff check services/notifier/ services/dedup/ services/shared/ services/listener/ services/relay_core/ services/relays/ services/debug/ cli/ schema_gen.py gen_python_types.py types/python/broker_relay_types/ $(if $(FIX),--fix)
 	@if grep -rn '__all__' services/ types/ cli/ --include='*.py'; then echo "ERROR: __all__ is banned — use explicit re-exports"; exit 1; fi
 
 local-up: ## Start full stack locally (no TLS, direct port access)
@@ -93,7 +93,7 @@ local-up: ## Start full stack locally (no TLS, direct port access)
 local-down: ## Stop local stack
 	$(LOCAL_COMPOSE) down
 
-e2e-up: ## Start E2E test stack (relays + ibkr-debug)
+e2e-up: ## Start E2E test stack (relays + debug)
 	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — run: cp .env.test.example .env.test (placeholder values are fine)"; exit 1; }
 	@if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		echo "Stack already running and connected"; \
@@ -118,7 +118,7 @@ e2e-down: ## Stop and remove E2E test stack
 	$(E2E_COMPOSE_DOWN) down
 
 e2e-run: ## Run E2E tests (stack must be up)
-	@$(E2E_COMPOSE) restart relays ibkr-debug > /dev/null 2>&1 && sleep 3
+	@$(E2E_COMPOSE) restart relays debug > /dev/null 2>&1 && sleep 3
 	$(PYTHON) -m pytest services/listener/tests/e2e/ -v
 
 e2e: ## Run E2E tests (starts/stops stack automatically)
