@@ -90,8 +90,47 @@ def _build_fetch(client: KrakenClient) -> Any:
 
     def fetch() -> str | None:
         try:
-            result = client.get_trades_history()
-            return json.dumps(result)
+            all_trades: dict[str, KrakenRestTrade] = {}  
+            offset = 0  
+            total_count: int | None = None  
+
+            while True:  
+                result = client.get_trades_history(ofs=offset)  
+                trades_raw = result.get("trades", {})  
+                if not isinstance(trades_raw, dict):  
+                    raise ValueError(  
+                        f"Invalid Kraken trades history response at ofs={offset}: "  
+                        f"'trades' must be a dict, got {type(trades_raw).__name__}"  
+                    )  
+
+                count_raw = result.get("count", 0)  
+                try:  
+                    page_total_count = int(count_raw)  
+                except (TypeError, ValueError) as exc:  
+                    raise ValueError(  
+                        f"Invalid Kraken trades history response at ofs={offset}: "  
+                        f"'count' must be an integer, got {count_raw!r}"  
+                    ) from exc  
+
+                if total_count is None:  
+                    total_count = page_total_count  
+
+                page_trades = cast(dict[str, KrakenRestTrade], trades_raw)  
+                if not page_trades:  
+                    break  
+
+                all_trades.update(page_trades)  
+                offset += len(page_trades)  
+
+                if offset >= page_total_count:  
+                    break  
+
+            return json.dumps(  
+                {  
+                    "trades": all_trades,  
+                    "count": total_count if total_count is not None else len(all_trades),  
+                }  
+            )
         except Exception:
             log.exception("Failed to fetch trades from Kraken")
             return None

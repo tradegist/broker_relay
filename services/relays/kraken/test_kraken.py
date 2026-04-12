@@ -5,7 +5,7 @@ import os
 import time
 import unittest
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from relay_core import (
     OnMessageResult,
@@ -14,6 +14,7 @@ from relay_core import (
     is_listener_enabled,
 )
 from relays.kraken import (
+    _build_fetch,
     _build_listener_config,
     _build_parse,
     _build_poller_configs,
@@ -33,7 +34,7 @@ from .kraken_types import KrakenRestTrade
 _ORIG_ENV: dict[str, str | None] = {}
 _TEST_ENV = {
     "KRAKEN_API_KEY": "test-api-key",
-    # base64.b64encode(b"test-secret-32-bytes-padded!!!!!") → valid base64
+    # base64.b64encode(b"test-secret") -> "dGVzdC1zZWNyZXQ="
     "KRAKEN_API_SECRET": "dGVzdC1zZWNyZXQ=",
     "KRAKEN_LISTENER_ENABLED": "true",
     "KRAKEN_POLL_INTERVAL": "60",
@@ -432,3 +433,103 @@ class TestBuildRelay(unittest.TestCase):
             relay = build_relay(notifiers=[])
         self.assertEqual(len(relay.poller_configs), 1)
         self.assertIsNone(relay.listener_config)
+
+
+# ── Paginated fetch tests ────────────────────────────────────────────────────
+
+
+class TestBuildFetchPagination(unittest.TestCase):
+    """Test the paginated fetch callable returned by _build_fetch()."""
+
+    def _make_client(self, pages: list[dict[str, Any]]) -> MagicMock:
+        """Create a mock KrakenClient whose get_trades_history returns pages in order."""
+        client = MagicMock()
+        client.get_trades_history = MagicMock(side_effect=pages)
+        return client
+
+    def _fetch_and_parse(self, client: MagicMock) -> dict[str, Any]:
+        fetch = _build_fetch(client)
+        raw = fetch()
+        self.assertIsNotNone(raw)
+        return json.loads(raw)  # type: ignore[arg-type]
+
+    def test_single_page(self) -> None:
+        pages = [
+            {"trades": {"T1": _make_rest_trade(), "T2": _make_rest_trade()}, "count": 2},
+        ]
+        client = self._make_client(pages)
+        result = self._fetch_and_parse(client)
+
+        self.assertEqual(len(result["trades"]), 2)
+        self.assertEqual(result["count"], 2)
+        client.get_trades_history.assert_called_once_with(ofs=0)
+
+    def test_multiple_pages(self) -> None:
+        pages = [
+            {"trades": {"T1": _make_rest_trade(), "T2": _make_rest_trade()}, "count": 5},
+            {"trades": {"T3": _make_rest_trade(), "T4": _make_rest_trade()}, "count": 5},
+            {"trades": {"T5": _make_rest_trade()}, "count": 5},
+        ]
+        client = self._make_client(pages)
+        result = self._fetch_and_parse(client)
+
+        self.assertEqual(len(result["trades"]), 5)
+        self.assertSetEqual(set(result["trades"].keys()), {"T1", "T2", "T3", "T4", "T5"})
+        self.assertEqual(result["count"], 5)
+        calls = client.get_trades_history.call_args_list
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0].kwargs["ofs"], 0)
+        self.assertEqual(calls[1].kwargs["ofs"], 2)
+        self.assertEqual(calls[2].kwargs["ofs"], 4)
+
+    def test_empty_first_page(self) -> None:
+        pages = [{"trades": {}, "count": 0}]
+        client = self._make_client(pages)
+        result = self._fetch_and_parse(client)
+
+        self.assertEqual(len(result["trades"]), 0)
+        self.assertEqual(result["count"], 0)
+
+    def test_second_page_empty_stops(self) -> None:
+        pages = [
+            {"trades": {"T1": _make_rest_trade()}, "count": 5},
+            {"trades": {}, "count": 5},
+        ]
+        client = self._make_client(pages)
+        result = self._fetch_and_parse(client)
+
+        self.assertEqual(len(result["trades"]), 1)
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(len(client.get_trades_history.call_args_list), 2)
+
+    def test_offset_reaches_count_stops(self) -> None:
+        """When offset == count after a page, no further request is made."""
+        pages = [
+            {"trades": {"T1": _make_rest_trade(), "T2": _make_rest_trade()}, "count": 4},
+            {"trades": {"T3": _make_rest_trade(), "T4": _make_rest_trade()}, "count": 4},
+        ]
+        client = self._make_client(pages)
+        result = self._fetch_and_parse(client)
+
+        self.assertEqual(len(result["trades"]), 4)
+        self.assertEqual(len(client.get_trades_history.call_args_list), 2)
+
+    def test_invalid_trades_type_returns_none(self) -> None:
+        """Non-dict 'trades' value causes fetch to return None (logged exception)."""
+        pages = [{"trades": ["not", "a", "dict"], "count": 3}]
+        client = self._make_client(pages)
+        fetch = _build_fetch(client)
+        self.assertIsNone(fetch())
+
+    def test_invalid_count_type_returns_none(self) -> None:
+        """Non-integer 'count' value causes fetch to return None (logged exception)."""
+        pages = [{"trades": {"T1": _make_rest_trade()}, "count": "abc"}]
+        client = self._make_client(pages)
+        fetch = _build_fetch(client)
+        self.assertIsNone(fetch())
+
+    def test_api_exception_returns_none(self) -> None:
+        client = MagicMock()
+        client.get_trades_history = MagicMock(side_effect=RuntimeError("network error"))
+        fetch = _build_fetch(client)
+        self.assertIsNone(fetch())

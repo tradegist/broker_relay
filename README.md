@@ -299,23 +299,23 @@ Configuration is split across three environment files. Templates are in `env_exa
 
 ### `.env` — App config
 
-| Variable                       | Required | Default            | Description                                                                                                     |
-| ------------------------------ | -------- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `SITE_DOMAIN`                  | Yes      | —                  | Domain for the relay API (see [Domains & HTTPS](#domains--https))                                               |
-| `API_TOKEN`                    | Yes      | —                  | Bearer token for `/relays/*` endpoints (`openssl rand -hex 32`)                                                 |
-| `RELAYS`                       | No       | —                  | Comma-separated relay adapters (e.g. `ibkr`, `ibkr,kraken`). Empty = API server only                            |
-| `NOTIFIERS`                    | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run                                                  |
-| `TARGET_WEBHOOK_URL`           | No       | —                  | Webhook endpoint (empty = log-only dry-run)                                                                     |
-| `WEBHOOK_SECRET`               | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                            |
-| `POLL_INTERVAL`                | No       | `600`              | Flex poll interval (seconds)                                                                                    |
-| `POLLER_ENABLED`               | No       | `true`             | Set to `false` to disable the poller globally (relay override: `{RELAY}_POLLER_ENABLED`)                        |
-| `LISTENER_ENABLED`             | No       | —                  | Set to `true` to enable real-time WS listener (requires ibkr_bridge)                                            |
-| `LISTENER_DEBOUNCE_MS`         | No       | `0`                | Milliseconds to buffer fills before flushing                                                                    |
+| Variable                            | Required | Default            | Description                                                                                                     |
+| ----------------------------------- | -------- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `SITE_DOMAIN`                       | Yes      | —                  | Domain for the relay API (see [Domains & HTTPS](#domains--https))                                               |
+| `API_TOKEN`                         | Yes      | —                  | Bearer token for `/relays/*` endpoints (`openssl rand -hex 32`)                                                 |
+| `RELAYS`                            | No       | —                  | Comma-separated relay adapters (e.g. `ibkr`, `ibkr,kraken`). Empty = API server only                            |
+| `NOTIFIERS`                         | No       | —                  | Active notification backends (e.g. `webhook`). Empty = dry-run                                                  |
+| `TARGET_WEBHOOK_URL`                | No       | —                  | Webhook endpoint (empty = log-only dry-run)                                                                     |
+| `WEBHOOK_SECRET`                    | No       | —                  | HMAC-SHA256 key for signing payloads (required if NOTIFIERS=webhook)                                            |
+| `POLL_INTERVAL`                     | No       | `600`              | Flex poll interval (seconds)                                                                                    |
+| `POLLER_ENABLED`                    | No       | `true`             | Set to `false` to disable the poller globally (relay override: `{RELAY}_POLLER_ENABLED`)                        |
+| `LISTENER_ENABLED`                  | No       | —                  | Set to `true` to enable real-time WS listeners globally; IBKR requires `ibkr_bridge`, Kraken does not           |
+| `LISTENER_DEBOUNCE_MS`              | No       | `0`                | Milliseconds to buffer fills before flushing                                                                    |
 | `IBKR_LISTENER_EXEC_EVENTS_ENABLED` | No       | `false`            | Enable `execDetailsEvent` webhooks (2x volume, lower latency)                                                   |
-| `DEBUG_WEBHOOK_PATH`           | No       | —                  | Route webhooks to debug inbox instead of `TARGET_WEBHOOK_URL` (see [Debug Webhook Inbox](#debug-webhook-inbox)) |
-| `MAX_DEBUG_WEBHOOK_PAYLOADS`   | No       | `100`              | Max payloads stored in the debug inbox (hard max: 150, FIFO eviction)                                           |
-| `DEBUG_LOG_LEVEL`              | No       | `INFO`             | Set to `DEBUG` to include full payload+headers in `docker logs debug`                                           |
-| `TIME_ZONE`                    | No       | `America/New_York` | Timezone (tz database format)                                                                                   |
+| `DEBUG_WEBHOOK_PATH`                | No       | —                  | Route webhooks to debug inbox instead of `TARGET_WEBHOOK_URL` (see [Debug Webhook Inbox](#debug-webhook-inbox)) |
+| `MAX_DEBUG_WEBHOOK_PAYLOADS`        | No       | `100`              | Max payloads stored in the debug inbox (hard max: 150, FIFO eviction)                                           |
+| `DEBUG_LOG_LEVEL`                   | No       | `INFO`             | Set to `DEBUG` to include full payload+headers in `docker logs debug`                                           |
+| `TIME_ZONE`                         | No       | `America/New_York` | Timezone (tz database format)                                                                                   |
 
 ### `.env.droplet` — CLI-only (never pushed to containers)
 
@@ -329,29 +329,29 @@ Configuration is split across three environment files. Templates are in `env_exa
 
 ### `.env.relays` — Relay-prefixed vars
 
-| Variable                  | Required | Description                                                       |
-| ------------------------- | -------- | ----------------------------------------------------------------- |
-| `IBKR_FLEX_TOKEN`         | Yes      | Flex Web Service token (from Client Portal)                       |
-| `IBKR_FLEX_QUERY_ID`      | Yes      | Flex Query ID (Trade Confirmation or Activity)                    |
-| `IBKR_FLEX_QUERY_ID_2`    | No       | Second account query ID (enables second poller within same relay) |
-| `IBKR_FLEX_TOKEN_2`       | No       | Second account token (defaults to primary if omitted)             |
-| `IBKR_NOTIFIERS`          | No       | Override `NOTIFIERS` for IBKR relay only                          |
-| `IBKR_TARGET_WEBHOOK_URL` | No       | Override `TARGET_WEBHOOK_URL` for IBKR relay only                 |
-| `IBKR_WEBHOOK_SECRET`     | No       | Override `WEBHOOK_SECRET` for IBKR relay only                     |
-| `IBKR_POLL_INTERVAL`      | No       | Override `POLL_INTERVAL` for IBKR relay only                      |
-| `IBKR_POLLER_ENABLED`     | No       | Override `POLLER_ENABLED` for IBKR relay only                     |
-| **Kraken**                    |          |                                                                   |
-| `KRAKEN_API_KEY`              | Yes\*    | Kraken API key (required when `kraken` is in `RELAYS`)            |
-| `KRAKEN_API_SECRET`           | Yes\*    | Kraken API secret, base64-encoded (required with API key)         |
-| `KRAKEN_LISTENER_ENABLED`     | No       | Enable WS v2 real-time listener (default: `false`)                |
-| `KRAKEN_LISTENER_DEBOUNCE_MS` | No       | Buffer fills N ms before dispatching webhook (default: `0`)       |
-| `KRAKEN_POLL_INTERVAL`        | No       | Override `POLL_INTERVAL` for Kraken relay only                    |
-| `KRAKEN_POLLER_ENABLED`       | No       | Override `POLLER_ENABLED` for Kraken relay only                   |
-| `KRAKEN_NOTIFIERS`            | No       | Override `NOTIFIERS` for Kraken relay only                        |
-| `KRAKEN_TARGET_WEBHOOK_URL`   | No       | Override `TARGET_WEBHOOK_URL` for Kraken relay only               |
-| `KRAKEN_WEBHOOK_SECRET`       | No       | Override `WEBHOOK_SECRET` for Kraken relay only                   |
-| `KRAKEN_NOTIFY_RETRIES`       | No       | Override `NOTIFY_RETRIES` for Kraken relay only                   |
-| `KRAKEN_NOTIFY_RETRY_DELAY_MS`| No       | Override `NOTIFY_RETRY_DELAY_MS` for Kraken relay only            |
+| Variable                       | Required | Description                                                       |
+| ------------------------------ | -------- | ----------------------------------------------------------------- |
+| `IBKR_FLEX_TOKEN`              | Yes      | Flex Web Service token (from Client Portal)                       |
+| `IBKR_FLEX_QUERY_ID`           | Yes      | Flex Query ID (Trade Confirmation or Activity)                    |
+| `IBKR_FLEX_QUERY_ID_2`         | No       | Second account query ID (enables second poller within same relay) |
+| `IBKR_FLEX_TOKEN_2`            | No       | Second account token (defaults to primary if omitted)             |
+| `IBKR_NOTIFIERS`               | No       | Override `NOTIFIERS` for IBKR relay only                          |
+| `IBKR_TARGET_WEBHOOK_URL`      | No       | Override `TARGET_WEBHOOK_URL` for IBKR relay only                 |
+| `IBKR_WEBHOOK_SECRET`          | No       | Override `WEBHOOK_SECRET` for IBKR relay only                     |
+| `IBKR_POLL_INTERVAL`           | No       | Override `POLL_INTERVAL` for IBKR relay only                      |
+| `IBKR_POLLER_ENABLED`          | No       | Override `POLLER_ENABLED` for IBKR relay only                     |
+| **Kraken**                     |          |                                                                   |
+| `KRAKEN_API_KEY`               | Yes\*    | Kraken API key (required when `kraken` is in `RELAYS`)            |
+| `KRAKEN_API_SECRET`            | Yes\*    | Kraken API secret, base64-encoded (required with API key)         |
+| `KRAKEN_LISTENER_ENABLED`      | No       | Enable WS v2 real-time listener (default: `false`)                |
+| `KRAKEN_LISTENER_DEBOUNCE_MS`  | No       | Buffer fills N ms before dispatching webhook (default: `0`)       |
+| `KRAKEN_POLL_INTERVAL`         | No       | Override `POLL_INTERVAL` for Kraken relay only                    |
+| `KRAKEN_POLLER_ENABLED`        | No       | Override `POLLER_ENABLED` for Kraken relay only                   |
+| `KRAKEN_NOTIFIERS`             | No       | Override `NOTIFIERS` for Kraken relay only                        |
+| `KRAKEN_TARGET_WEBHOOK_URL`    | No       | Override `TARGET_WEBHOOK_URL` for Kraken relay only               |
+| `KRAKEN_WEBHOOK_SECRET`        | No       | Override `WEBHOOK_SECRET` for Kraken relay only                   |
+| `KRAKEN_NOTIFY_RETRIES`        | No       | Override `NOTIFY_RETRIES` for Kraken relay only                   |
+| `KRAKEN_NOTIFY_RETRY_DELAY_MS` | No       | Override `NOTIFY_RETRY_DELAY_MS` for Kraken relay only            |
 
 Adding a new relay's vars requires no compose changes — just add prefixed vars to `.env.relays`.
 
@@ -404,22 +404,22 @@ The envelope uses a discriminated union pattern — `relay` identifies the broke
 
 All broker adapters use the same **CommonFill** model. The `data` array contains `Trade` objects with these guaranteed fields:
 
-| Field        | Type                | Description                                                                               |
-| ------------ | ------------------- | ----------------------------------------------------------------------------------------- |
-| `orderId`    | `string`            | Permanent order identifier (unique per account)                                           |
-| `symbol`     | `string`            | Instrument symbol                                                                         |
-| `assetClass` | `AssetClass`        | `"equity"`, `"option"`, `"crypto"`, `"future"`, `"forex"`, or `"other"`                   |
-| `side`       | `"buy" \| "sell"`   | Trade direction (lowercase)                                                               |
-| `orderType`  | `OrderType \| null` | Normalized: `"market"`, `"limit"`, `"stop"`, `"stop_limit"`, `"trailing_stop"`, or `null` |
-| `price`      | `number`            | VWAP when aggregated, single fill price otherwise                                         |
-| `volume`     | `number`            | Sum of fill quantities                                                                    |
-| `cost`       | `number`            | Total cost (sum of fills)                                                                 |
-| `fee`        | `number`            | Total fees/commissions (always positive — amount paid)                                    |
-| `fillCount`  | `number`            | Number of fills aggregated into this trade                                                |
-| `execIds`    | `string[]`          | One execution ID per fill (for tracing back to individual fills)                          |
-| `timestamp`  | `string`            | Latest fill timestamp                                                                     |
+| Field        | Type                | Description                                                                                                                                              |
+| ------------ | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `orderId`    | `string`            | Permanent order identifier (unique per account)                                                                                                          |
+| `symbol`     | `string`            | Instrument symbol                                                                                                                                        |
+| `assetClass` | `AssetClass`        | `"equity"`, `"option"`, `"crypto"`, `"future"`, `"forex"`, or `"other"`                                                                                  |
+| `side`       | `"buy" \| "sell"`   | Trade direction (lowercase)                                                                                                                              |
+| `orderType`  | `OrderType \| null` | Normalized: `"market"`, `"limit"`, `"stop"`, `"stop_limit"`, `"trailing_stop"`, or `null`                                                                |
+| `price`      | `number`            | VWAP when aggregated, single fill price otherwise                                                                                                        |
+| `volume`     | `number`            | Sum of fill quantities                                                                                                                                   |
+| `cost`       | `number`            | Total cost (sum of fills)                                                                                                                                |
+| `fee`        | `number`            | Total fees/commissions (always positive — amount paid)                                                                                                   |
+| `fillCount`  | `number`            | Number of fills aggregated into this trade                                                                                                               |
+| `execIds`    | `string[]`          | One execution ID per fill (for tracing back to individual fills)                                                                                         |
+| `timestamp`  | `string`            | Latest fill timestamp                                                                                                                                    |
 | `source`     | `string`            | Origin: `"flex"` (IBKR Flex poll), `"execDetailsEvent"` / `"commissionReportEvent"` (IBKR WS), `"rest_poll"` (Kraken REST), `"ws_execution"` (Kraken WS) |
-| `raw`        | `object`            | Original broker-specific payload (all fields, unmodified)                                 |
+| `raw`        | `object`            | Original broker-specific payload (all fields, unmodified)                                                                                                |
 
 The `raw` object preserves the full broker-specific data. For IBKR Flex, this includes ~100 XML attributes (account info, security details, financial fields, dates). Consumers should treat `raw` as opaque broker data — the CommonFill fields above are the stable contract.
 
@@ -755,7 +755,7 @@ The listener connects to `wss://ws-auth.kraken.com/v2`, subscribes to the `execu
       "assetClass": "crypto",
       "side": "buy",
       "orderType": "limit",
-      "price": 2450.50,
+      "price": 2450.5,
       "volume": 0.5,
       "cost": 1225.25,
       "fee": 0.32,
@@ -833,9 +833,9 @@ Then run `make sync` to push the config and restart the `relays` container.
 
 The listener processes two event types from the bridge stream:
 
-| Event                   | Default     | Description                                                                                                                                                                                                  |
-| ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `commissionReportEvent` | **enabled** | Fired after commission is confirmed — contains the final fill with fee data. This is the primary fill event.                                                                                                 |
+| Event                   | Default     | Description                                                                                                                                                                                                       |
+| ----------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commissionReportEvent` | **enabled** | Fired after commission is confirmed — contains the final fill with fee data. This is the primary fill event.                                                                                                      |
 | `execDetailsEvent`      | disabled    | Fired immediately on execution — no commission data yet. Enable with `IBKR_LISTENER_EXEC_EVENTS_ENABLED=true` for sub-second latency at the cost of 2× webhook volume (one preliminary + one confirmed per fill). |
 
 ### Operational notes

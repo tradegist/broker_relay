@@ -60,17 +60,15 @@ class KrakenClient:
         try:
             body = resp.json()
         except Exception as exc:
-            snippet = resp.text[:200]
-            raise RuntimeError(
-                f"Kraken API returned invalid JSON on {urlpath} "
-                f"(status {resp.status_code}): {exc} — body: {snippet!r}"
-            ) from exc
+            raise RuntimeError(  
+                f"Kraken API returned invalid JSON on {urlpath} "  
+                f"(status {resp.status_code}): {exc}"  
+            ) from exc  
 
-        if not isinstance(body, dict):
-            snippet = resp.text[:200]
-            raise RuntimeError(
-                f"Kraken API returned unexpected JSON type on {urlpath} "
-                f"(expected object, got {type(body).__name__}) — body: {snippet!r}"
+        if not isinstance(body, dict):  
+            raise RuntimeError(  
+                f"Kraken API returned unexpected JSON type on {urlpath} "  
+                f"(status {resp.status_code}; expected object, got {type(body).__name__})"
             )
 
         errors = body.get("error", [])
