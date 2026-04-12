@@ -50,7 +50,7 @@ POLL_INTERVAL=600
 # ── Listener (real-time trade events) ────────────────────────────────
 
 # Set to any non-empty value to enable the listener.
-#LISTENER_ENABLED=true
+#LISTENER_ENABLED=false
 
 # Milliseconds to debounce incoming real-time fills before firing webhooks.
 # Useful for grouping rapidly executing partial fills into a single webhook
