@@ -364,6 +364,7 @@ class TestOnMessage(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(results[0].mark)
         self.assertIsNotNone(results[0].fill)
         fill = results[0].fill
+        assert fill is not None
         self.assertEqual(fill.execId, "EXEC-1")
 
     async def test_non_trade_exec_type_returns_empty(self) -> None:

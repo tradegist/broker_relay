@@ -127,7 +127,7 @@ def _build_parse() -> Any:
                 errors.append(f"Failed to parse trade {txid}: expected an object, got {type(trade_data).__name__}")
                 continue
             try:
-                fill = _parse_rest_trade(txid, trade_data)
+                fill = _parse_rest_trade(txid, cast(KrakenRestTrade, trade_data))
                 fills.append(fill)
             except Exception as exc:
                 errors.append(f"Failed to parse trade {txid}: {exc}")
