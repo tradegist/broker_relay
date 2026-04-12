@@ -32,6 +32,9 @@ WEBHOOK_SECRET=your_hmac_secret_key
 #MAX_DEBUG_WEBHOOK_PAYLOADS=100
 #DEBUG_LOG_LEVEL=INFO
 
+# Log level for the main relay container (DEBUG, INFO, WARNING, ERROR).
+#LOG_LEVEL=INFO
+
 # ── Relays ────────────────────────────────────────────────────────────
 
 # Comma-separated list of relay adapters to activate (e.g. "ibkr").

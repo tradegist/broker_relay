@@ -8,6 +8,7 @@ Reads RELAYS env var, loads each adapter via the registry, then:
 
 import asyncio
 import logging
+import os
 import sys
 
 from . import BrokerRelay
@@ -17,8 +18,9 @@ from .poller_engine import init_dedup_db, poll_once, prune_old
 from .registry import load_relays
 from .routes import start_api_server
 
+_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, _LOG_LEVEL, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
