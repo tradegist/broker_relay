@@ -258,7 +258,7 @@ def _build_connect(
         log.debug("[ibkr] WS URL: %s", url)
         ws = await session.ws_connect(url, headers=headers, heartbeat=30.0)
 
-        # Wrap the original __anext__ to track seq numbers.
+        # Wrap the original receive method to track seq numbers.
         _orig_receive = ws.receive
 
         async def _tracking_receive() -> aiohttp.WSMessage:
