@@ -7,7 +7,6 @@ from shared import BuySell
 from .kraken_types import KrakenWsExecution, KrakenWsMessage
 from .ws_parser import _parse_fill, normalize_order_type, parse_executions
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 

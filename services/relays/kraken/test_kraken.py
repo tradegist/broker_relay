@@ -14,9 +14,9 @@ from relay_core import (
     is_listener_enabled,
 )
 from relays.kraken import (
+    _build_listener_config,
     _build_parse,
     _build_poller_configs,
-    _build_listener_config,
     _event_filter,
     _get_api_key,
     _get_api_secret,
