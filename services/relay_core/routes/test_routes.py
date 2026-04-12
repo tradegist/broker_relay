@@ -11,7 +11,7 @@ from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
 
 from relay_core import BrokerRelay, PollerConfig
-from relay_core.routes import create_app
+from relay_core.routes import _RELAYS_KEY, create_app
 from shared import RelayName
 
 _TEST_TOKEN = "test-secret-token"
@@ -212,7 +212,7 @@ class TestPollLockConflict(AioHTTPTestCase):
 
         # Actually, in aiohttp test context with asyncio.to_thread, we need a
         # different approach. Lock the poll_lock manually before the request.
-        relays: dict[str, BrokerRelay] = self.app["relays"]
+        relays: dict[str, BrokerRelay] = self.app[_RELAYS_KEY]
         relay = relays["ibkr"]
         await relay.poll_locks[0].acquire()
 

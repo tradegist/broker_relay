@@ -140,11 +140,11 @@ Configuration is split into three env files to separate concerns and enable scal
 
 Three Docker containers in a single Compose stack on a DigitalOcean droplet (debug is optional):
 
-| Service  | Role                                                                                                                                                                              |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `caddy`  | Reverse proxy with automatic HTTPS (Let's Encrypt)                                                                                                                                |
-| `relays` | Multi-relay service: loads broker adapters via the registry, runs pollers + listeners + HTTP API. Disabled when `RELAYS` is empty (API server still runs for health checks)       |
-| `debug`  | Debug webhook inbox — captures webhook payloads for inspection. Disabled by default (`DEBUG_REPLICAS=0`), enabled when `DEBUG_WEBHOOK_PATH` is set                                |
+| Service  | Role                                                                                                                                                                        |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `caddy`  | Reverse proxy with automatic HTTPS (Let's Encrypt)                                                                                                                          |
+| `relays` | Multi-relay service: loads broker adapters via the registry, runs pollers + listeners + HTTP API. Disabled when `RELAYS` is empty (API server still runs for health checks) |
+| `debug`  | Debug webhook inbox — captures webhook payloads for inspection. Disabled by default (`DEBUG_REPLICAS=0`), enabled when `DEBUG_WEBHOOK_PATH` is set                          |
 
 ### Relay Registry Pattern
 
@@ -157,6 +157,7 @@ The `relays` container uses a **registry pattern** to support multiple broker ad
 5. `main.py` starts a poll loop per `PollerConfig` and a WS listener (if configured).
 
 **Adding a new broker:**
+
 1. Add the name to `RelayName` in `services/shared/models.py`.
 2. Create `services/relays/<name>/__init__.py` with a `build_relay(notifiers) -> BrokerRelay` function.
 3. Add the relay's prefixed env vars to `.env.relays`.
@@ -402,10 +403,10 @@ services/relay_core/dedup/
 
 This project has **two model locations** — a shared source of truth and one service-specific file:
 
-| File                                  | Domain               | Contains                                                                                                  |
-| ------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------- |
-| `services/shared/models.py`           | CommonFill (outbound)| `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `RelayName` |
-| `services/relay_core/relay_models.py` | Relay API (outbound) | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                            |
+| File                                  | Domain                | Contains                                                                                                               |
+| ------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `services/shared/models.py`           | CommonFill (outbound) | `Fill`, `Trade`, `WebhookPayloadTrades`, `WebhookPayload`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `RelayName` |
+| `services/relay_core/relay_models.py` | Relay API (outbound)  | Re-exports shared models + `RunPollResponse`, `HealthResponse`                                                         |
 
 - **`services/shared/models.py`** is the single source of truth for all webhook payload models. The `__init__.py` barrel re-exports everything so `from shared import Fill` keeps working.
 - **`services/shared/utilities.py`** contains internal helpers (`aggregate_fills`, `normalize_order_type`, `normalize_asset_class`, `_dedup_id`). These are not exported to consumer packages.

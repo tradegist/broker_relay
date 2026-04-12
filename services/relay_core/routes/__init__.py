@@ -18,6 +18,8 @@ from .middlewares import AUTH_PREFIX, auth_middleware
 
 log = logging.getLogger("routes")
 
+_RELAYS_KEY: web.AppKey[dict[str, BrokerRelay]] = web.AppKey("relays")
+
 
 async def handle_health(request: web.Request) -> web.Response:
     """GET /health — unauthenticated status check."""
@@ -29,7 +31,7 @@ async def handle_poll(request: web.Request) -> web.Response:
     """POST /relays/{relay_name}/poll/{poll_idx} — trigger an on-demand poll."""
     relay_name = request.match_info["relay_name"]
     poll_idx_raw = request.match_info["poll_idx"]
-    relays: dict[str, BrokerRelay] = request.app["relays"]
+    relays: dict[str, BrokerRelay] = request.app[_RELAYS_KEY]
 
     relay = relays.get(relay_name)
     if relay is None:
@@ -116,7 +118,7 @@ def create_app(relays: list[BrokerRelay]) -> web.Application:
 
     # Index relays by name for O(1) lookup in handlers.
     relay_map: dict[str, BrokerRelay] = {r.name: r for r in relays}
-    app["relays"] = relay_map
+    app[_RELAYS_KEY] = relay_map
 
     app.router.add_get("/health", handle_health)
     app.router.add_post(f"{AUTH_PREFIX}/{{relay_name}}/poll/{{poll_idx}}", handle_poll)
