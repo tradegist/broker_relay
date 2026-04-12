@@ -18,23 +18,30 @@ from .poller_engine import init_dedup_db, poll_once, prune_old
 from .registry import load_relays
 from .routes import start_api_server
 
-_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
-logging.basicConfig(
-    level=getattr(logging, _LOG_LEVEL, logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-
-# Redact sensitive query-param tokens (e.g. Flex ``t=``) from all log output.
-# The filter lives in flex_fetch; we install it on every root handler so it
-# catches records propagated from child loggers like httpx._client.
-from relays.ibkr.flex_fetch import _RedactTokenFilter  # noqa: E402
-
-_redact = _RedactTokenFilter()
-for _h in logging.getLogger().handlers:
-    _h.addFilter(_redact)
-
 log = logging.getLogger("relays")
+
+
+def configure_logging() -> None:
+    """Set up root logging and redaction filters.
+
+    Called once from ``amain()`` so the level respects env vars at startup
+    rather than at import time.
+    """
+    from relays.ibkr.flex_fetch import _RedactTokenFilter
+
+    level_name = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
+    logging.basicConfig(
+        level=getattr(logging, level_name, logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Redact sensitive query-param tokens (e.g. Flex ``t=``) from all log output.
+    # The filter lives in flex_fetch; we install it on every root handler so it
+    # catches records propagated from child loggers like httpx._client.
+    redact = _RedactTokenFilter()
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(redact)
 
 
 async def _poll_loop(
@@ -77,6 +84,7 @@ async def _run_listener(relay: BrokerRelay) -> None:
 
 async def amain() -> None:
     """Load all relays, start API server, pollers, and listeners."""
+    configure_logging()
     relays = load_relays()
     init_relays(relays)
     if not relays:
