@@ -1,4 +1,4 @@
-.PHONY: deps setup deploy destroy pause resume sync poll test-webhook ibkr-flex-dump types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
+.PHONY: deps setup deploy destroy pause resume sync poll test-webhook ibkr-flex-dump ibkr-flex-refresh types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
 
 PROJECT = broker-relay
 PYTHON ?= .venv/bin/python3
@@ -75,6 +75,18 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 ibkr-flex-dump: ## Dump a live IBKR Flex XML response (make ibkr-flex-dump [F=/tmp/raw.xml] [S=_2])
 	@set -a; . ./.env.relays; set +a; \
 	$(PYTHON) -m relays.ibkr.flex_fetch --dump $${F:--} $(if $(S),--suffix $(S),)
+
+ibkr-flex-refresh: ## Refresh IBKR Flex fixture (fetch + auto-detect AF/TC + sanitize) [S=_2]
+	@raw=services/relays/ibkr/fixtures/raw.xml; \
+	set -a; . ./.env.relays; set +a; \
+	$(PYTHON) -m relays.ibkr.flex_fetch --dump $$raw $(if $(S),--suffix $(S),) && \
+	if grep -q '<TradeConfirm' $$raw; then \
+		out=services/relays/ibkr/fixtures/trade_confirm_sample.xml; kind="Trade Confirmation"; \
+	else \
+		out=services/relays/ibkr/fixtures/activity_flex_sample.xml; kind="Activity Flex"; \
+	fi; \
+	$(PYTHON) services/relays/ibkr/fixtures/sanitize.py $$raw $$out && rm -f $$raw && \
+	echo "Detected $$kind response -> $$out"
 
 types: typecheck ## Regenerate TypeScript + Python types from Pydantic models
 	PYTHONPATH=services $(PYTHON) schema_gen.py shared > types/typescript/shared/types.schema.json
