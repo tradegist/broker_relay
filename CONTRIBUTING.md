@@ -44,27 +44,14 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make help        Show available commands
 ```
 
-You can also invoke the CLI directly with `python3 -m cli <command>` — useful on Windows or when Make is not available:
+Every target above maps 1:1 to `python3 -m cli <command>` — useful on Windows where `make` isn't available.
 
 > [!NOTE]
-> Most commands work on Windows, but `sync --local-files` requires `rsync` and SSH, which are only available natively on macOS and Linux. On Windows, use [WSL](https://learn.microsoft.com/en-us/windows/wsl/).
+> `make sync LOCAL_FILES=1` requires `rsync` and SSH, which are only native on macOS and Linux. On Windows, use [WSL](https://learn.microsoft.com/en-us/windows/wsl/).
+
+Usage examples showing the parameter variants:
 
 ```bash
-python3 -m cli deploy
-python3 -m cli sync
-python3 -m cli poll ibkr 1            # primary poller
-python3 -m cli poll ibkr 2            # second account
-python3 -m cli test-webhook           # send sample trades to webhook
-python3 -m cli test-webhook 2         # send to second webhook
-python3 -m cli pause
-python3 -m cli resume
-python3 -m cli destroy
-```
-
-`make` examples:
-
-```bash
-make deploy                                    # provision droplet + start containers
 make sync                                      # push .env + .env.relays + restart all services
 make sync S=relays                             # push env + restart one service
 make sync B=1                                  # push env + rebuild images + restart
@@ -76,16 +63,9 @@ make poll V=1                                  # verbose (stream container logs)
 make poll REPLAY=3                             # resend 3 trades (skip dedup)
 make test-webhook                              # send 3 sample trades to webhook
 make test-webhook S=2                          # send to second webhook
-make test                                      # run unit tests
-make typecheck                                 # strict mypy checking
 make logs                                      # stream relays logs (droplet)
 make logs S=debug                              # stream debug inbox logs
 make logs ENV=local                            # stream local stack logs
-```
-
-```bash
-make pause                           # snapshot + delete droplet
-make resume                          # restore from snapshot
 ```
 
 ### Which service to sync

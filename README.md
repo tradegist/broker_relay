@@ -7,11 +7,11 @@ A **relay between broker accounts** that provides clear, common interfaces to co
 
 ## Why This Project?
 
-Broker APIs are fragmented — each has its own data formats, auth patterns, and delivery mechanisms. Building the infrastructure to poll for fills, parse responses, deduplicate, and deliver webhooks takes time for **each** broker you want to integrate.
+Broker APIs are fragmented — each has its own data formats, auth patterns, and delivery mechanisms. Every integration rebuilds the same plumbing: polling, parsing, dedup, webhook delivery.
 
-Broker Relay abstracts this away with a **relay adapter pattern**: one generic engine handles polling, dedup, aggregation, and webhook delivery, while broker-specific adapters handle the API quirks. Adding a new broker means writing one adapter — the infrastructure is already there.
+Broker Relay abstracts this with a **relay adapter pattern**: one generic engine handles polling, dedup, aggregation, and webhook delivery; broker-specific adapters handle the API quirks. Adding a broker is writing one adapter.
 
-Currently the project supports **IBKR** (Interactive Brokers) via the Flex Web Service and **Kraken** (crypto exchange) via the REST and WebSocket v2 APIs. It deploys to a DigitalOcean droplet (starting at **$4/month**) with:
+Currently supports **IBKR** (Interactive Brokers) via the Flex Web Service and **Kraken** (crypto exchange) via REST + WebSocket v2. Deploys to a DigitalOcean droplet from **$4/month**, with:
 
 - **A relay engine** that checks for trade fills and sends them to your webhook URL via a common payload format
 - **Automatic HTTPS** via Caddy + Let's Encrypt
@@ -20,9 +20,9 @@ Currently the project supports **IBKR** (Interactive Brokers) via the Flex Web S
 - **Multi-account support** within each broker adapter
 - **Optional real-time listeners** — IBKR via [ibkr_bridge](https://github.com/tradegist/ibkr_bridge) WebSocket, Kraken via native WS v2 executions channel
 
-**Current direction:** Broker → User (trade fill events). Future plans include User → Broker communication (order placement).
+**Scope:** Broker → User (trade fill events). Future plans include User → Broker (order placement).
 
-> **Looking for order placement?** See [ibkr_bridge](https://github.com/tradegist/ibkr_bridge) — a companion project that runs the IB Gateway and exposes an HTTP API for placing orders and a real-time WebSocket event stream.
+> **For IBKR order placement**, see the companion project [ibkr_bridge](https://github.com/tradegist/ibkr_bridge) — it runs the IB Gateway and exposes an HTTP API + WebSocket event stream.
 
 ## Table of Contents
 
@@ -95,7 +95,7 @@ make destroy
 
 All endpoints require `Authorization: Bearer <API_TOKEN>` header (except health).
 
-#### Trigger a poll
+### Trigger a poll
 
 ```
 POST /relays/{relay_name}/poll/{poll_idx}
@@ -103,7 +103,7 @@ POST /relays/{relay_name}/poll/{poll_idx}
 
 No body required. Immediately polls the broker for new fills and sends them to the configured webhook. `poll_idx` is 1-based (e.g. `/relays/ibkr/poll/1` for the primary poller, `/relays/ibkr/poll/2` for the second account).
 
-#### Health check
+### Health check
 
 ```
 GET /health
