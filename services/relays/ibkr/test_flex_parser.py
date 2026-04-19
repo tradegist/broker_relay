@@ -902,7 +902,9 @@ class TestLiveFixtures:
             assert fill.assetClass == "equity"
             assert fill.side == BuySell.BUY
             assert fill.source == "flex"
-        # execID (TC) is aliased to ibExecId internally — synthetic values
-        # from test_flex_parser's TC_* fixtures.
+        # execID (TC) is aliased to ibExecId internally.  Per-row counter
+        # in sanitize.py produces unique execIds so dedup doesn't collapse
+        # the two rows.
         assert by_symbol["AAPL"].execId == "00018d97.00000001.01.01"
-        assert by_symbol["GOOG"].execId == "00018d98.00000002.01.01"
+        assert by_symbol["GOOG"].execId == "00018d97.00000002.01.01"
+        assert len({f.execId for f in fills}) == len(fills)
