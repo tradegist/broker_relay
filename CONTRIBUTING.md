@@ -46,7 +46,7 @@ All operations are available via `make` or the Python CLI directly. Run `make he
   make help              Show available commands
 ```
 
-Every target above maps 1:1 to `python3 -m cli <command>` — useful on Windows where `make` isn't available.
+Most targets map 1:1 to `python3 -m cli <command>` — useful on Windows where `make` isn't available. Exceptions: `ibkr-flex-dump` and `ibkr-flex-refresh` invoke `python -m relays.ibkr.flex_dump` directly and have no `cli` equivalent.
 
 > [!NOTE]
 > `make sync LOCAL_FILES=1` requires `rsync` and SSH, which are only native on macOS and Linux. On Windows, use [WSL](https://learn.microsoft.com/en-us/windows/wsl/).

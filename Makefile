@@ -77,8 +77,8 @@ ibkr-flex-dump: ## Dump a live IBKR Flex XML response (make ibkr-flex-dump [F=/t
 	set -a; . ./.env.relays; set +a; \
 	suffix="$(S)"; \
 	$(PYTHON) -m relays.ibkr.flex_dump \
-		--token "$$(eval echo \$${IBKR_FLEX_TOKEN$$suffix})" \
-		--query-id "$$(eval echo \$${IBKR_FLEX_QUERY_ID$$suffix})" \
+		--token "$$(printenv "IBKR_FLEX_TOKEN$$suffix")" \
+		--query-id "$$(printenv "IBKR_FLEX_QUERY_ID$$suffix")" \
 		$(if $(F),--dump $(F))
 
 ibkr-flex-refresh: ## Refresh IBKR Flex fixture (fetch + auto-detect AF/TC + sanitize) [S=_2]
@@ -87,8 +87,8 @@ ibkr-flex-refresh: ## Refresh IBKR Flex fixture (fetch + auto-detect AF/TC + san
 	set -a; . ./.env.relays; set +a; \
 	suffix="$(S)"; \
 	$(PYTHON) -m relays.ibkr.flex_dump \
-		--token "$$(eval echo \$${IBKR_FLEX_TOKEN$$suffix})" \
-		--query-id "$$(eval echo \$${IBKR_FLEX_QUERY_ID$$suffix})" && \
+		--token "$$(printenv "IBKR_FLEX_TOKEN$$suffix")" \
+		--query-id "$$(printenv "IBKR_FLEX_QUERY_ID$$suffix")" && \
 	if grep -q '<TradeConfirm' $$raw; then \
 		out=services/relays/ibkr/fixtures/trade_confirm_sample.xml; kind="Trade Confirmation"; \
 	else \
