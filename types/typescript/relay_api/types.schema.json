@@ -84,6 +84,54 @@
           ],
           "type": "string"
         },
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fxRate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fxRateBase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fxRateSource": {
+          "anyOf": [
+            {
+              "enum": [
+                "historical",
+                "latest"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "raw": {
           "additionalProperties": true,
           "type": "object"
@@ -94,6 +142,7 @@
         "symbol",
         "assetClass",
         "side",
+        "orderType",
         "price",
         "volume",
         "cost",
@@ -102,6 +151,10 @@
         "execIds",
         "timestamp",
         "source",
+        "currency",
+        "fxRate",
+        "fxRateBase",
+        "fxRateSource",
         "raw"
       ],
       "title": "Trade",

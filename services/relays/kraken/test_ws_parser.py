@@ -105,6 +105,7 @@ class TestParseExecutions(unittest.TestCase):
         self.assertEqual(len(fills), 1)
         self.assertEqual(errors, [])
         self.assertEqual(fills[0].execId, "TXID-001")
+        self.assertEqual(fills[0].currency, "USD")
 
     def test_parse_error_appended_not_raised(self) -> None:
         item = _make_execution(side="invalid_side")
@@ -143,7 +144,7 @@ class TestParseFill(unittest.TestCase):
         self.assertEqual(fill.price, 65000.0)
         self.assertEqual(fill.volume, 0.1)
         self.assertEqual(fill.cost, 6500.0)
-        self.assertEqual(fill.timestamp, "2026-04-12T10:00:00Z")
+        self.assertEqual(fill.timestamp, "2026-04-12T10:00:00")
         self.assertEqual(fill.source, "ws_execution")
 
     def test_buy_side(self) -> None:
@@ -198,7 +199,7 @@ class TestParseFill(unittest.TestCase):
             "last_price": 1.0,
             "last_qty": 1.0,
             "cost": 1.0,
-            "timestamp": "ts",
+            "timestamp": "2026-04-12T10:00:00Z",
         }
         fill = _parse_fill(item)
         self.assertEqual(fill.fee, 0.0)

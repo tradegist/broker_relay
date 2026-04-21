@@ -1,1 +1,1 @@
-export { BuySell, Fill, Trade } from "./types";
+export { BuySell, Fill, FxRateSource, Trade } from "./types";

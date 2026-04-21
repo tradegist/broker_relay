@@ -26,7 +26,7 @@ export interface Trade {
   symbol: string;
   assetClass: "equity" | "option" | "crypto" | "future" | "forex" | "other";
   side: BuySell;
-  orderType?: ("market" | "limit" | "stop" | "stop_limit" | "trailing_stop") | null;
+  orderType: ("market" | "limit" | "stop" | "stop_limit" | "trailing_stop") | null;
   price: number;
   volume: number;
   cost: number;
@@ -35,6 +35,10 @@ export interface Trade {
   execIds: string[];
   timestamp: string;
   source: "flex" | "execDetailsEvent" | "commissionReportEvent" | "rest_poll" | "ws_execution";
+  currency: string | null;
+  fxRate: number | null;
+  fxRateBase: string | null;
+  fxRateSource: ("historical" | "latest") | null;
   raw: {
     [k: string]: unknown;
   };

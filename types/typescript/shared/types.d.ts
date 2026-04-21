@@ -10,6 +10,7 @@ export type AssetClass = "crypto" | "equity" | "forex" | "future" | "option" | "
 export type BuySell = "buy" | "sell";
 export type OrderType = "limit" | "market" | "stop" | "stop_limit" | "trailing_stop";
 export type Source = "commissionReportEvent" | "execDetailsEvent" | "flex" | "rest_poll" | "ws_execution";
+export type FxRateSource = "historical" | "latest";
 
 /**
  * Aggregated trade (one or more fills for the same order).
@@ -19,7 +20,7 @@ export interface Trade {
   symbol: string;
   assetClass: AssetClass;
   side: BuySell;
-  orderType?: OrderType | null;
+  orderType: OrderType | null;
   price: number;
   volume: number;
   cost: number;
@@ -28,6 +29,10 @@ export interface Trade {
   execIds: string[];
   timestamp: string;
   source: Source;
+  currency: string | null;
+  fxRate: number | null;
+  fxRateBase: string | null;
+  fxRateSource: FxRateSource | null;
   raw: {
     [k: string]: unknown;
   };
@@ -41,13 +46,14 @@ export interface Fill {
   symbol: string;
   assetClass: AssetClass;
   side: BuySell;
-  orderType?: OrderType | null;
+  orderType: OrderType | null;
   price: number;
   volume: number;
   cost: number;
   fee: number;
   timestamp: string;
   source: Source;
+  currency: string | null;
   raw: {
     [k: string]: unknown;
   };

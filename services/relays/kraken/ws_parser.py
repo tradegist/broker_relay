@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from relay_core.parsing import require_float, require_str
-from shared import BuySell, Fill, OrderType
+from shared import BuySell, Fill, OrderType, normalize_timestamp
 
+from .currency import resolve_fx_currency
 from .kraken_types import KrakenWsExecution, KrakenWsMessage
 
 # Kraken order type strings -> normalized OrderType.
@@ -109,10 +110,17 @@ def _parse_fill(item: KrakenWsExecution) -> Fill:
 
     order_type = normalize_order_type(require_str(item, "order_type", ctx))
 
+    symbol = require_str(item, "symbol", ctx)
+    ts_raw = require_str(item, "timestamp", ctx)
+    try:
+        ts = normalize_timestamp(ts_raw)
+    except ValueError as exc:
+        raise ValueError(f"{ctx}: invalid timestamp {ts_raw!r}: {exc}") from exc
+
     return Fill(
         execId=require_str(item, "exec_id", ctx),
         orderId=require_str(item, "order_id", ctx),
-        symbol=require_str(item, "symbol", ctx),
+        symbol=symbol,
         assetClass="crypto",
         side=side,
         orderType=order_type,
@@ -120,7 +128,8 @@ def _parse_fill(item: KrakenWsExecution) -> Fill:
         volume=require_float(item, "last_qty", ctx),
         cost=require_float(item, "cost", ctx),
         fee=total_fee,
-        timestamp=require_str(item, "timestamp", ctx),
+        timestamp=ts,
         source="ws_execution",
+        currency=resolve_fx_currency(symbol),
         raw=dict(item),
     )

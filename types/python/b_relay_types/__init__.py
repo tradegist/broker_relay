@@ -15,6 +15,7 @@ from .relay_api import RunPollResponse as RunPollResponse
 from .shared import AssetClass as AssetClass
 from .shared import BuySell as BuySell
 from .shared import Fill as Fill
+from .shared import FxRateSource as FxRateSource
 from .shared import OrderType as OrderType
 from .shared import Source as Source
 from .shared import Trade as Trade

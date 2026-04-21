@@ -30,7 +30,7 @@ OUT_DIR = pathlib.Path("types/python/b_relay_types")
 
 # Public symbols re-exported from the top-level __init__.py barrel.
 # Must be kept in sync with the source models manually.
-SHARED_EXPORTS = ["AssetClass", "BuySell", "Fill", "OrderType", "Source", "Trade"]
+SHARED_EXPORTS = ["AssetClass", "BuySell", "Fill", "FxRateSource", "OrderType", "Source", "Trade"]
 NOTIFIER_EXPORTS = ["WebhookPayload", "WebhookPayloadTrades"]
 RELAY_API_EXPORTS = ["HealthResponse", "RunPollResponse"]
 

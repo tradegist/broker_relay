@@ -20,6 +20,7 @@ from relay_core.context import get_relay
 from relay_core.dedup import get_processed_ids, mark_processed_batch
 from relay_core.dedup import init_db as _init_dedup_db
 from relay_core.env import get_env, get_env_int
+from relay_core.fx import enrich_if_enabled
 from relay_core.notifier import notify
 from relay_core.notifier.models import WebhookPayloadTrades
 from shared import Fill, RelayName, aggregate_fills
@@ -155,6 +156,9 @@ def _send_and_mark(
         if not trades:
             return
 
+        fx_errors: list[str] = []
+        trades = enrich_if_enabled(trades, fx_errors)
+
         for trade in trades:
             log.info(
                 "Listener trade: %s %s orderId=%s @ %s (vol %s, %d fill(s))",
@@ -164,7 +168,7 @@ def _send_and_mark(
 
         # Mark-after-notify: notify then mark (never reversed).
         # If notify raises NotificationError, mark is skipped.
-        payload = WebhookPayloadTrades(relay=relay_name, data=trades, errors=[])
+        payload = WebhookPayloadTrades(relay=relay_name, data=trades, errors=fx_errors)
         notify(
             relay.notifiers, payload,
             retries=relay.notify_retries,
@@ -193,6 +197,9 @@ def _send_no_mark(
     if not trades:
         return
 
+    fx_errors: list[str] = []
+    trades = enrich_if_enabled(trades, fx_errors)
+
     for trade in trades:
         log.info(
             "Listener preliminary: %s %s orderId=%s @ %s (no commission)",
@@ -200,7 +207,7 @@ def _send_no_mark(
         )
     notify(
         relay.notifiers,
-        WebhookPayloadTrades(relay=relay_name, data=trades, errors=[]),
+        WebhookPayloadTrades(relay=relay_name, data=trades, errors=fx_errors),
         retries=relay.notify_retries,
         retry_delay_ms=relay.notify_retry_delay_ms,
     )

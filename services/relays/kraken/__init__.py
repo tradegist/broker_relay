@@ -29,6 +29,7 @@ from relay_core import (
 from relay_core.parsing import require_float, require_str
 from shared import BuySell, Fill
 
+from .currency import resolve_fx_currency
 from .kraken_types import KrakenRestTrade, KrakenWsMessage
 from .rest_client import KrakenClient
 from .ws_parser import normalize_order_type, parse_executions
@@ -67,16 +68,18 @@ def _parse_rest_trade(txid: str, data: KrakenRestTrade) -> Fill:
     else:
         raise ValueError(f"{ctx}: invalid trade side {side_str!r}")
 
+    # Kraken REST returns a Unix epoch; format directly into canonical UTC.
     ts = time.strftime(
-        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(require_float(data, "time", ctx))
+        "%Y-%m-%dT%H:%M:%S", time.gmtime(require_float(data, "time", ctx))
     )
 
     order_type = normalize_order_type(require_str(data, "ordertype", ctx))
 
+    pair = require_str(data, "pair", ctx)
     return Fill(
         execId=txid,
         orderId=require_str(data, "ordertxid", ctx),
-        symbol=require_str(data, "pair", ctx),
+        symbol=pair,
         assetClass="crypto",
         side=side,
         orderType=order_type,
@@ -86,6 +89,7 @@ def _parse_rest_trade(txid: str, data: KrakenRestTrade) -> Fill:
         fee=abs(require_float(data, "fee", ctx)),
         timestamp=ts,
         source="rest_poll",
+        currency=resolve_fx_currency(pair),
         raw={"txid": txid, **data},
     )
 
