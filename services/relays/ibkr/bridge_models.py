@@ -7,6 +7,11 @@ When ibkr-bridge-types is published to PyPI, replace this file with
 a pip dependency.
 
 !! Do not edit manually — re-copy from ibkr_bridge when models change.
+
+!! Every ConfigDict uses ``extra="allow"`` (NOT ``extra="forbid"``) so that
+!! new fields added upstream by ib_async or IBKR do not cause whole events
+!! to be dropped on validation failure — they flow through to ``Fill.raw``.
+!! The same change must be kept in sync in ibkr_bridge's source file.
 """
 
 from typing import Literal
@@ -24,7 +29,7 @@ WsEventType = Literal[
 class WsComboLeg(BaseModel):
     """Mirrors ib_async.contract.ComboLeg (ib_async 2.1.0)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     conId: int
     ratio: int
@@ -39,7 +44,7 @@ class WsComboLeg(BaseModel):
 class WsDeltaNeutralContract(BaseModel):
     """Mirrors ib_async.contract.DeltaNeutralContract (ib_async 2.1.0)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     conId: int
     delta: float
@@ -49,7 +54,7 @@ class WsDeltaNeutralContract(BaseModel):
 class WsContract(BaseModel):
     """Mirrors ib_async.contract.Contract (ib_async 2.1.0)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     secType: str
     conId: int
@@ -76,7 +81,7 @@ class WsContract(BaseModel):
 class WsExecution(BaseModel):
     """Mirrors ib_async.objects.Execution (ib_async 2.1.0)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     execId: str
     time: str
@@ -102,7 +107,7 @@ class WsExecution(BaseModel):
 class WsCommissionReport(BaseModel):
     """Mirrors ib_async.objects.CommissionReport (ib_async 2.1.0)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     execId: str
     commission: float
@@ -115,7 +120,7 @@ class WsCommissionReport(BaseModel):
 class WsFill(BaseModel):
     """Mirrors ib_async.objects.Fill NamedTuple (ib_async 2.1.0)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     contract: WsContract
     execution: WsExecution
@@ -126,7 +131,7 @@ class WsFill(BaseModel):
 class WsEnvelope(BaseModel):
     """Top-level WebSocket message wrapper."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     type: WsEventType
     seq: int

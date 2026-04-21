@@ -57,6 +57,26 @@ POLL_INTERVAL=600
 # request (which gets deduped against previous executions). Default: 0 (disabled).
 #LISTENER_DEBOUNCE_MS=2000
 
+# ── FX rate enrichment (optional) ────────────────────────────────────
+
+# When enabled, each outbound Trade is augmented with fxRate, fxRateBase,
+# and fxRateSource so downstream systems can convert cost into a common
+# reporting currency. Opt-in — disabled by default.
+#FX_RATES_ENABLED=false
+
+# ISO-4217 code for the reporting base (required when FX_RATES_ENABLED=true).
+#FX_RATES_BASE_CURRENCY=EUR
+
+# API key from https://www.exchangerate-api.com. Optional:
+#   - With a key: historical daily rates are available for any trade date.
+#   - Without a key: only today's rate (from the free open.er-api.com
+#     endpoint) is used. Trades older than today will ship without fxRate
+#     and the reason will appear in the webhook payload `errors` array.
+#FX_RATE_API_KEY=
+
+# Days to retain cached historical rates in the meta DB (default: 730 = 2y).
+#FX_CACHE_RETENTION_DAYS=730
+
 # ── Notification retry ───────────────────────────────────────────────
 
 # Retry attempts per notifier backend on failure (0 = no retries, max 5)

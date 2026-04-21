@@ -105,6 +105,7 @@ class TestParseExecutions(unittest.TestCase):
         self.assertEqual(len(fills), 1)
         self.assertEqual(errors, [])
         self.assertEqual(fills[0].execId, "TXID-001")
+        self.assertEqual(fills[0].currency, "USD")
 
     def test_parse_error_appended_not_raised(self) -> None:
         item = _make_execution(side="invalid_side")

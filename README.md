@@ -31,6 +31,7 @@ Currently supports **IBKR** (Interactive Brokers) via the Flex Web Service and *
 - [Architecture](#architecture)
 - [Configuration](#configuration)
 - [Webhook Payload](#webhook-payload)
+  - [FX Rate Enrichment](#fx-rate-enrichment)
   - [Debug Webhook Inbox](#debug-webhook-inbox)
 - [IBKR Setup](#ibkr-setup)
 - [Kraken Setup](#kraken-setup)
@@ -195,6 +196,10 @@ Configuration is split across three environment files. Templates are in `env_exa
 | `DEBUG_WEBHOOK_PATH`                | No       | —                  | Route webhooks to debug inbox instead of `TARGET_WEBHOOK_URL` (see [Debug Webhook Inbox](#debug-webhook-inbox)) |
 | `MAX_DEBUG_WEBHOOK_PAYLOADS`        | No       | `100`              | Max payloads stored in the debug inbox (hard max: 150, FIFO eviction)                                           |
 | `DEBUG_LOG_LEVEL`                   | No       | `INFO`             | Set to `DEBUG` to include full payload+headers in `docker logs debug`                                           |
+| `FX_RATES_ENABLED`                  | No       | `false`            | Attach `fxRate`/`fxRateBase`/`fxRateSource` to each Trade (see [FX Rate Enrichment](#fx-rate-enrichment))       |
+| `FX_RATES_BASE_CURRENCY`            | No\*     | —                  | ISO-4217 base currency (required when `FX_RATES_ENABLED=true`)                                                  |
+| `FX_RATE_API_KEY`                   | No       | —                  | [exchangerate-api.com](https://www.exchangerate-api.com) key — enables historical rates                         |
+| `FX_CACHE_RETENTION_DAYS`           | No       | `730`              | Days to retain cached historical rates in the meta DB                                                           |
 | `TIME_ZONE`                         | No       | `America/New_York` | Timezone (tz database format)                                                                                   |
 
 ### `.env.droplet` — CLI-only (never pushed to containers)
@@ -299,6 +304,10 @@ All broker adapters use the same **CommonFill** model. The `data` array contains
 | `execIds`    | `string[]`          | One execution ID per fill (for tracing back to individual fills)                                                                                         |
 | `timestamp`  | `string`            | Latest fill timestamp                                                                                                                                    |
 | `source`     | `string`            | Origin: `"flex"` (IBKR Flex poll), `"execDetailsEvent"` / `"commissionReportEvent"` (IBKR WS), `"rest_poll"` (Kraken REST), `"ws_execution"` (Kraken WS) |
+| `currency`   | `string \| null`    | ISO-4217 currency of the asset traded (e.g. `"USD"` for AAPL). `null` when the broker doesn't expose it                                                  |
+| `fxRate`     | `number \| null`    | FX rate such that `cost * fxRate = cost_in_base`. Only populated when `FX_RATES_ENABLED=true` (see [FX Rate Enrichment](#fx-rate-enrichment))            |
+| `fxRateBase` | `string \| null`    | ISO-4217 base currency the `fxRate` converts to                                                                                                          |
+| `fxRateSource` | `string \| null`  | `"historical"` or `"latest"` — whether the rate is the trade-day rate (paid API) or most recent (keyless)                                                |
 | `raw`        | `object`            | Original broker-specific payload (all fields, unmodified)                                                                                                |
 
 The `raw` object preserves the full broker-specific data. For IBKR Flex, this includes ~100 XML attributes (account info, security details, financial fields, dates). Consumers should treat `raw` as opaque broker data — the CommonFill fields above are the stable contract.
@@ -324,6 +333,40 @@ assert(headerValue === `sha256=${expected}`);
 ```
 
 If `TARGET_WEBHOOK_URL` is empty, the relay logs the payload to stdout (dry-run mode) instead of sending it.
+
+### FX Rate Enrichment
+
+Each outbound Trade can optionally include FX rate information so downstream systems can convert `cost` into a single reporting currency. Opt in via `.env`:
+
+```env
+FX_RATES_ENABLED=true
+FX_RATES_BASE_CURRENCY=EUR
+# Optional — enables historical rates for any trade date:
+#FX_RATE_API_KEY=your-exchangerate-api-key
+# Optional — retention for cached historical rates in the meta DB (default: 730):
+#FX_CACHE_RETENTION_DAYS=730
+```
+
+**Convention:** `fxRate` is expressed as *units of `fxRateBase` per 1 unit of `currency`*, so `cost * fxRate = cost_in_base`. Example: for a USD trade with base EUR, `fxRate ≈ 0.835` (i.e. `1 USD → 0.835 EUR`).
+
+**With an API key** ([exchangerate-api.com](https://www.exchangerate-api.com)) — the relay uses the `/history/{base}/{YYYY}/{M}/{D}` endpoint to fetch the trade-day rate. Rates are cached in-memory and persisted to the `relay-meta` Docker volume so restarts don't refetch.
+
+**Without an API key** — the relay falls back to the keyless [open.er-api.com](https://open.er-api.com) latest endpoint (no history available). Trades older than today ship with `fxRate=null` and a human-readable reason appended to the payload's `errors` array:
+
+```json
+{
+  "relay": "ibkr",
+  "type": "trades",
+  "data": [{ "orderId": "123", "currency": "USD", "fxRate": null, "fxRateBase": null, "fxRateSource": null, ... }],
+  "errors": ["Trade 123: historical FX unavailable (trade date 2026-04-10 < today 2026-04-19; set FX_RATE_API_KEY to enable historical lookups) — fxRate omitted"]
+}
+```
+
+**Currency detection** is per-relay:
+- **IBKR** — lifted directly from the Flex XML `currency` attribute / bridge `contract.currency`.
+- **Kraken** — resolved from the pair's quote side. Known stablecoins are normalised (`USDT`/`USDC`/`DAI`/`PYUSD`/`TUSD`/`FDUSD`/`USDP` → `USD`; `EURT`/`EURC` → `EUR`; `GBPT` → `GBP`). Crypto-quoted-in-crypto pairs (e.g. `ETH/BTC`) ship without `fxRate`.
+
+Upstream failures, unknown currencies, and missing API keys are isolated per-trade: a single bad lookup never prevents a trade from shipping.
 
 ### Debug Webhook Inbox
 

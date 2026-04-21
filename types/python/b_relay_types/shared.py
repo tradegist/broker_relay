@@ -32,10 +32,29 @@ Source = Literal[
 ]
 
 
+FxRateSource = Literal["historical", "latest"]
+
+
+def _all_fields_required(schema: dict[str, Any]) -> None:
+    """Mark every declared field as required in JSON Schema.
+
+    Pydantic's default JSON serialization always emits keys (``None`` →
+    ``null``, never omitted), so optional fields on the wire are always
+    present. Without this hook, json-schema-to-typescript generates
+    ``field?: T | null`` — implying the key may be missing — which
+    doesn't match the actual payload. This hook forces the tighter
+    ``field: T | null``.
+    """
+    properties = schema.get("properties", {})
+    schema["required"] = list(properties.keys())
+
+
 class Fill(BaseModel):
     """Individual execution from a broker (CommonFill spec)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid", json_schema_extra=_all_fields_required,
+    )
 
     execId: str
     orderId: str
@@ -49,13 +68,19 @@ class Fill(BaseModel):
     fee: float
     timestamp: str
     source: Source
+    # ISO-4217 code of the asset traded (e.g. "USD" for AAPL). None when the
+    # broker does not expose an unambiguous fiat currency for the fill (e.g.
+    # crypto-quoted-in-crypto pairs like ETH/BTC).
+    currency: str | None = None
     raw: dict[str, Any]
 
 
 class Trade(BaseModel):
     """Aggregated trade (one or more fills for the same order)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid", json_schema_extra=_all_fields_required,
+    )
 
     orderId: str
     symbol: str
@@ -70,4 +95,12 @@ class Trade(BaseModel):
     execIds: list[str]
     timestamp: str
     source: Source
+    # Copied from the last fill — ISO-4217 or None (see Fill.currency).
+    currency: str | None = None
+    # Units of fxRateBase per 1 unit of currency, such that
+    # cost * fxRate == cost_in_base_currency. Populated by the FX
+    # enrichment layer when FX_RATES_ENABLED=true and currency is known.
+    fxRate: float | None = None
+    fxRateBase: str | None = None
+    fxRateSource: FxRateSource | None = None
     raw: dict[str, Any]

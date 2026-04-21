@@ -15,6 +15,7 @@ from relay_core.context import get_relay
 from relay_core.dedup import get_processed_ids, mark_processed_batch, prune
 from relay_core.dedup import init_db as _init_dedup_db
 from relay_core.env import get_env, get_env_int
+from relay_core.fx import enrich_if_enabled
 from relay_core.notifier import notify
 from relay_core.notifier.models import WebhookPayloadTrades
 from shared import Fill, RelayName, Trade, aggregate_fills
@@ -236,6 +237,7 @@ def poll_once(
                 sorted_fills = sorted(all_fills, key=lambda f: f.timestamp, reverse=True)
                 replay_fills = sorted_fills[:replay]
                 trades = aggregate_fills(replay_fills)
+                trades = enrich_if_enabled(trades, parse_errors)
                 relay_log.info(
                     "Replay mode: resending %d fill(s) as %d trade(s)",
                     len(replay_fills), len(trades),
@@ -252,6 +254,7 @@ def poll_once(
 
         # Aggregate only the NEW fills by order
         trades = aggregate_fills(new_fills)
+        trades = enrich_if_enabled(trades, parse_errors)
         relay_log.info("Aggregated into %d trade(s)", len(trades))
 
         for trade in trades:

@@ -172,6 +172,7 @@ def _map_fill(envelope: WsEnvelope) -> Fill | None:
         return None
 
     source = cast(Source, envelope.type)
+    currency = contract.currency.strip().upper() or None
 
     return Fill(
         execId=exec_id,
@@ -186,6 +187,7 @@ def _map_fill(envelope: WsEnvelope) -> Fill | None:
         fee=abs(cr.commission),  # Always positive (amount paid)
         timestamp=ex.time,
         source=source,
+        currency=currency,
         raw=envelope.model_dump(),
     )
 

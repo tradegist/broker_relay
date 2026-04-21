@@ -150,6 +150,8 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
                 row_errors.append(f"Unknown assetCategory {asset_raw!r}, using 'other'")
 
             # Build CommonFill
+            currency_raw = str(raw.get("currency", "")).strip().upper()
+            currency = currency_raw or None
             try:
                 fill = Fill(
                     execId=exec_id,
@@ -164,6 +166,7 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
                     fee=abs(float(raw.get("commission", 0.0))),
                     timestamp=str(raw.get("dateTime", "")),
                     source="flex",
+                    currency=currency,
                     raw=raw,
                 )
             except Exception as exc:

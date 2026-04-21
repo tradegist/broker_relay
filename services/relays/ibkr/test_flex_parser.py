@@ -136,6 +136,7 @@ class TestParseFillsBasic:
         assert len(fills) == 2
         assert fills[0].symbol == "AAPL"
         assert fills[1].symbol == "GOOG"
+        assert fills[0].currency == "USD"
 
     def test_trade_confirmation_basic(self) -> None:
         xml = _wrap_tc(TC_AAPL, TC_GOOG)

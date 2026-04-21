@@ -5,6 +5,7 @@ from __future__ import annotations
 from relay_core.parsing import require_float, require_str
 from shared import BuySell, Fill, OrderType
 
+from .currency import resolve_fx_currency
 from .kraken_types import KrakenWsExecution, KrakenWsMessage
 
 # Kraken order type strings -> normalized OrderType.
@@ -109,10 +110,11 @@ def _parse_fill(item: KrakenWsExecution) -> Fill:
 
     order_type = normalize_order_type(require_str(item, "order_type", ctx))
 
+    symbol = require_str(item, "symbol", ctx)
     return Fill(
         execId=require_str(item, "exec_id", ctx),
         orderId=require_str(item, "order_id", ctx),
-        symbol=require_str(item, "symbol", ctx),
+        symbol=symbol,
         assetClass="crypto",
         side=side,
         orderType=order_type,
@@ -122,5 +124,6 @@ def _parse_fill(item: KrakenWsExecution) -> Fill:
         fee=total_fee,
         timestamp=require_str(item, "timestamp", ctx),
         source="ws_execution",
+        currency=resolve_fx_currency(symbol),
         raw=dict(item),
     )

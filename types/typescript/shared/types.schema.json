@@ -62,6 +62,50 @@
         "source": {
           "$ref": "#/$defs/Source"
         },
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fxRate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fxRateBase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fxRateSource": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FxRateSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "raw": {
           "additionalProperties": true,
           "type": "object"
@@ -72,6 +116,7 @@
         "symbol",
         "assetClass",
         "side",
+        "orderType",
         "price",
         "volume",
         "cost",
@@ -80,6 +125,10 @@
         "execIds",
         "timestamp",
         "source",
+        "currency",
+        "fxRate",
+        "fxRateBase",
+        "fxRateSource",
         "raw"
       ],
       "title": "Trade",
@@ -133,6 +182,17 @@
         "source": {
           "$ref": "#/$defs/Source"
         },
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "raw": {
           "additionalProperties": true,
           "type": "object"
@@ -144,12 +204,14 @@
         "symbol",
         "assetClass",
         "side",
+        "orderType",
         "price",
         "volume",
         "cost",
         "fee",
         "timestamp",
         "source",
+        "currency",
         "raw"
       ],
       "title": "Fill",
@@ -163,6 +225,13 @@
         "future",
         "option",
         "other"
+      ],
+      "type": "string"
+    },
+    "FxRateSource": {
+      "enum": [
+        "historical",
+        "latest"
       ],
       "type": "string"
     },
