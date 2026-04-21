@@ -49,6 +49,16 @@ _STABLECOINS: dict[str, str] = {
     "GBPT": "GBP",
 }
 
+# Precomputed suffix table for _split_concatenated: every known fiat,
+# stablecoin, and Kraken alias, ordered longest-first so e.g. "USDT"
+# beats "USD" when matching "SOLUSDT". Built once at import time.
+_QUOTE_SUFFIXES: tuple[str, ...] = tuple(
+    sorted(
+        set(_KRAKEN_FIAT_ALIASES) | set(_STABLECOINS) | set(_FIATS),
+        key=len, reverse=True,
+    )
+)
+
 
 def _normalise_token(token: str) -> str | None:
     """Return the ISO-4217 fiat for *token*, or None if it is not a fiat/stablecoin."""
@@ -67,20 +77,14 @@ def _normalise_token(token: str) -> str | None:
 def _split_concatenated(pair: str) -> tuple[str, str] | None:
     """Split a concatenated Kraken pair like ``XBTUSD`` or ``SOLUSDT`` into (base, quote).
 
-    Tries the longest matching known quote token first so ``SOLUSDT``
-    splits into (``SOL``, ``USDT``) rather than (``SOLUSD``, ``T``).
+    Tries the longest matching known quote token first (via the
+    module-level :data:`_QUOTE_SUFFIXES`) so ``SOLUSDT`` splits into
+    (``SOL``, ``USDT``) rather than (``SOLUSD``, ``T``).
     """
     p = pair.strip().upper()
     if not p:
         return None
-
-    candidates: list[str] = [
-        *_KRAKEN_FIAT_ALIASES.keys(),   # ZUSD, ZEUR, … (4 chars)
-        *_STABLECOINS.keys(),           # USDT, USDC, PYUSD, … (3-5 chars)
-        *_FIATS,                        # USD, EUR, … (3 chars)
-    ]
-    # Longest suffix first so "USDT" beats "USD".
-    for quote in sorted(set(candidates), key=len, reverse=True):
+    for quote in _QUOTE_SUFFIXES:
         if len(p) > len(quote) and p.endswith(quote):
             return p[: -len(quote)], quote
     return None

@@ -17,21 +17,44 @@ colocated with the relay that owns it.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+# Accepted ISO-8601 grammar for normalize_timestamp: the full date + time
+# form, with optional fractional seconds and optional tz designator. This
+# explicitly rejects date-only (``2026-04-19``) and truncated-time
+# (``2026-04-19T15:30``) inputs that ``datetime.fromisoformat`` would
+# silently inflate to midnight / zero-seconds.
+_ISO_8601_FULL_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"  # required date + time
+    r"(\.\d+)?"                                # optional fractional seconds
+    r"(Z|[+-]\d{2}:\d{2})?$"                  # optional tz designator
+)
 
 
 def normalize_timestamp(raw: str, *, assume_tz: tzinfo | None = None) -> str:
     """Return *raw* (ISO-8601) reformatted as canonical ``YYYY-MM-DDTHH:MM:SS`` UTC.
 
+    Accepted grammar: ``YYYY-MM-DDTHH:MM:SS`` with optional fractional
+    seconds (``.fff...``) and optional tz designator (``Z`` or
+    ``±HH:MM``). Date-only inputs and truncated-time forms are rejected
+    so we never silently invent midnight or zero-seconds.
+
     - Tz-aware inputs are converted to UTC (``assume_tz`` ignored).
     - Tz-naive inputs are interpreted in ``assume_tz`` (default: UTC).
     - Fractional seconds are dropped.
 
-    Raises ``ValueError`` when *raw* is empty or not valid ISO-8601.
+    Raises ``ValueError`` when *raw* is empty or doesn't match the
+    accepted grammar.
     """
     if not raw:
         raise ValueError("empty timestamp")
+    if not _ISO_8601_FULL_RE.match(raw):
+        raise ValueError(
+            f"Not a valid ISO-8601 timestamp "
+            f"(expected YYYY-MM-DDTHH:MM:SS[.fff][Z|±HH:MM], got {raw!r})"
+        )
 
     try:
         dt = datetime.fromisoformat(raw)

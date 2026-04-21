@@ -70,6 +70,30 @@ class TestNormalizeTimestamp(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalize_timestamp("2026/04/11 10:30:00")
 
+    # ── Reject partial ISO forms that fromisoformat would silently inflate ──
+
+    def test_date_only_raises(self) -> None:
+        # fromisoformat would silently produce midnight — we want a loud fail
+        # so callers don't accidentally stamp every trade at 00:00:00.
+        with self.assertRaises(ValueError):
+            normalize_timestamp("2026-04-19")
+
+    def test_time_without_seconds_raises(self) -> None:
+        # fromisoformat would silently fill seconds=0.
+        with self.assertRaises(ValueError):
+            normalize_timestamp("2026-04-19T15:30")
+
+    def test_time_hour_only_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            normalize_timestamp("2026-04-19T15")
+
+    def test_space_separator_raises(self) -> None:
+        # We only accept T as the date/time separator. Single-character
+        # unicode separators are technically ISO-8601 but not something
+        # we want to silently accept.
+        with self.assertRaises(ValueError):
+            normalize_timestamp("2026-04-19 15:30:00")
+
 
 class TestToEpoch(unittest.TestCase):
 
