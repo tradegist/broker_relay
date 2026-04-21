@@ -48,6 +48,25 @@ def normalize_timestamp(raw: str, *, assume_tz: tzinfo | None = None) -> str:
     return dt_utc.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def to_epoch(ts: str) -> int:
+    """Return *ts* as Unix epoch seconds (UTC), or ``0`` for empty input.
+
+    *ts* must be in the canonical form produced by
+    :func:`normalize_timestamp` — i.e. naive ISO-8601, interpreted as UTC.
+    An empty string is treated as "no timestamp" and returns ``0`` to
+    preserve the existing "no watermark" semantics used by the poller.
+
+    Raises ``ValueError`` for any non-empty, non-canonical input — that
+    would indicate a bug upstream (a Fill that bypassed normalisation).
+    """
+    if not ts:
+        return 0
+    dt = datetime.fromisoformat(ts)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return int(dt.timestamp())
+
+
 def parse_timezone(name: str) -> ZoneInfo:
     """Return a ``ZoneInfo`` for *name*, or raise ``ValueError``.
 

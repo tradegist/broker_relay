@@ -18,7 +18,7 @@ from relay_core.env import get_env, get_env_int
 from relay_core.fx import enrich_if_enabled
 from relay_core.notifier import notify
 from relay_core.notifier.models import WebhookPayloadTrades
-from shared import Fill, RelayName, Trade, aggregate_fills
+from shared import Fill, RelayName, Trade, aggregate_fills, to_epoch
 
 log = logging.getLogger(__name__)
 
@@ -97,23 +97,35 @@ def _meta_key(relay_name: str, poller_index: int) -> str:
 
 def get_last_poll_ts(
     meta_conn: sqlite3.Connection, relay_name: str, poller_index: int = 0,
-) -> str:
-    """Return the last processed trade timestamp, or empty string."""
+) -> int:
+    """Return the last processed trade timestamp as Unix epoch seconds.
+
+    Returns 0 when no watermark is stored OR when the stored value is not
+    a valid integer — the latter happens after a format migration (e.g.
+    older versions stored ISO strings). A legacy value is silently
+    discarded and rewritten by the next successful poll; the dedup layer
+    still prevents double-dispatch for already-processed fills.
+    """
     key = _meta_key(relay_name, poller_index)
     row = meta_conn.execute(
         "SELECT value FROM metadata WHERE key = ?", (key,),
     ).fetchone()
-    return row[0] if row else ""
+    if not row:
+        return 0
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return 0
 
 
 def set_last_poll_ts(
-    meta_conn: sqlite3.Connection, ts: str, relay_name: str, poller_index: int = 0,
+    meta_conn: sqlite3.Connection, ts: int, relay_name: str, poller_index: int = 0,
 ) -> None:
-    """Update the last processed trade timestamp."""
+    """Update the last processed trade timestamp (Unix epoch seconds)."""
     key = _meta_key(relay_name, poller_index)
     meta_conn.execute(
         "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
-        (key, ts),
+        (key, str(ts)),
     )
     meta_conn.commit()
 
@@ -205,19 +217,22 @@ def poll_once(
                 all_trades[0].model_dump_json(indent=2, exclude={"raw"}),
             )
 
-        # Pre-filter by timestamp watermark to reduce dedup work
+        # Pre-filter by timestamp watermark to reduce dedup work. The
+        # watermark is stored as Unix epoch seconds (format-stable across
+        # wire-format changes); fill timestamps are canonical ISO strings
+        # converted to epoch on the fly for comparison.
         last_ts = get_last_poll_ts(meta_conn, relay_name, poller_index)
         if last_ts:
-            candidates = [f for f in all_fills if f.timestamp >= last_ts]
+            candidates = [f for f in all_fills if to_epoch(f.timestamp) >= last_ts]
             relay_log.info(
                 "Timestamp pre-filter: %d -> %d candidate(s) (watermark: %s)",
                 len(all_fills), len(candidates), last_ts,
             )
             if len(candidates) < len(all_fills):
-                filtered = [f for f in all_fills if f.timestamp < last_ts]
+                filtered = [f for f in all_fills if to_epoch(f.timestamp) < last_ts]
                 for f in filtered:
                     relay_log.info(
-                        "  Filtered out: %s %s timestamp=%s < watermark %s",
+                        "  Filtered out: %s %s timestamp=%s < watermark %d",
                         f.side, f.symbol, f.timestamp, last_ts,
                     )
         else:
@@ -276,10 +291,14 @@ def poll_once(
         all_new_ids = [did for t in trades for did in t.execIds]
         mark_processed_batch(dedup_conn, _prefix_ids(relay_name, all_new_ids))
 
-        # Update timestamp watermark to the latest trade time
-        max_ts = max(f.timestamp for f in new_fills)
+        # Update timestamp watermark to the latest trade time (stored as
+        # epoch int; logged with the human-readable ISO source for context).
+        latest_fill = max(new_fills, key=lambda f: to_epoch(f.timestamp))
+        max_ts = to_epoch(latest_fill.timestamp)
         set_last_poll_ts(meta_conn, max_ts, relay_name, poller_index)
-        relay_log.info("Updated timestamp watermark to %s", max_ts)
+        relay_log.info(
+            "Updated timestamp watermark to %d (%s)", max_ts, latest_fill.timestamp,
+        )
 
         relay_log.info("Sent 1 webhook with %d trade(s)", len(trades))
         return trades

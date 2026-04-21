@@ -21,7 +21,7 @@ from relay_core.poller_engine import (
     prune_old,
     set_last_poll_ts,
 )
-from shared import BuySell, Fill, Trade
+from shared import BuySell, Fill, Trade, to_epoch
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ def _make_fill(**overrides: Any) -> Fill:
         "fee": 0.0,
         "execId": "TX1",
         "orderId": "ORD1",
-        "timestamp": "20250403;100000",
+        "timestamp": "2025-04-03T10:00:00",
         "raw": {},
     }
     defaults.update(overrides)
@@ -81,7 +81,7 @@ def _make_trade(**overrides: Any) -> Trade:
         "cost": 0.0,
         "fee": 0.0,
         "orderId": "ORD1",
-        "timestamp": "20250403;100000",
+        "timestamp": "2025-04-03T10:00:00",
         "execIds": ["TX1"],
         "fillCount": 1,
         "raw": {},
@@ -164,23 +164,38 @@ class TestInitDb:
 
 
 class TestTimestampWatermark:
-    def test_get_returns_empty_when_unset(self, meta_db: sqlite3.Connection) -> None:
-        assert get_last_poll_ts(meta_db, "ibkr") == ""
+    def test_get_returns_zero_when_unset(self, meta_db: sqlite3.Connection) -> None:
+        assert get_last_poll_ts(meta_db, "ibkr") == 0
 
     def test_set_and_get(self, meta_db: sqlite3.Connection) -> None:
-        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
-        assert get_last_poll_ts(meta_db, "ibkr") == "20250403;120000"
+        set_last_poll_ts(meta_db, 1743681600, "ibkr")
+        assert get_last_poll_ts(meta_db, "ibkr") == 1743681600
 
     def test_update_overwrites(self, meta_db: sqlite3.Connection) -> None:
-        set_last_poll_ts(meta_db, "20250401;000000", "ibkr")
-        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
-        assert get_last_poll_ts(meta_db, "ibkr") == "20250403;120000"
+        set_last_poll_ts(meta_db, 1743508800, "ibkr")
+        set_last_poll_ts(meta_db, 1743681600, "ibkr")
+        assert get_last_poll_ts(meta_db, "ibkr") == 1743681600
 
     def test_different_relays_isolated(self, meta_db: sqlite3.Connection) -> None:
-        set_last_poll_ts(meta_db, "20250401;000000", "ibkr")
-        set_last_poll_ts(meta_db, "20250501;000000", "ibkr", poller_index=1)
-        assert get_last_poll_ts(meta_db, "ibkr") == "20250401;000000"
-        assert get_last_poll_ts(meta_db, "ibkr", poller_index=1) == "20250501;000000"
+        set_last_poll_ts(meta_db, 1743508800, "ibkr")
+        set_last_poll_ts(meta_db, 1746057600, "ibkr", poller_index=1)
+        assert get_last_poll_ts(meta_db, "ibkr") == 1743508800
+        assert get_last_poll_ts(meta_db, "ibkr", poller_index=1) == 1746057600
+
+    def test_legacy_string_value_discarded(self, meta_db: sqlite3.Connection) -> None:
+        """Pre-refactor deployments stored ISO/compact strings in the meta DB.
+
+        The getter must treat any non-integer value as "no watermark" (0) so
+        upgrades don't silently filter all new fills. The dedup layer still
+        prevents double-dispatch of already-processed fills.
+        """
+        # Write a legacy-format value directly (bypasses the typed setter).
+        meta_db.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+            ("ibkr:last_poll_ts", "2025-04-03T12:00:00"),
+        )
+        meta_db.commit()
+        assert get_last_poll_ts(meta_db, "ibkr") == 0
 
 
 class TestPruneOld:
@@ -290,24 +305,24 @@ class TestPollOnce:
         self, mock_notify: MagicMock,
         dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
     ) -> None:
-        fill = _make_fill(timestamp="20250403;150000")
+        fill = _make_fill(timestamp="2025-04-03T15:00:00")
         cfg = _MockPollerConfig(
             fetch=lambda: "<xml/>",
             parse=lambda _: ([fill], []),
         )
         _set_poller(cfg)
         poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
-        assert get_last_poll_ts(meta_db, "ibkr") == "20250403;150000"
+        assert get_last_poll_ts(meta_db, "ibkr") == to_epoch("2025-04-03T15:00:00")
 
     @patch("relay_core.poller_engine.notify")
     def test_watermark_pre_filters_old_fills(
         self, mock_notify: MagicMock,
         dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
     ) -> None:
-        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
+        set_last_poll_ts(meta_db, to_epoch("2025-04-03T12:00:00"), "ibkr")
 
-        old_fill = _make_fill(execId="OLD", timestamp="20250403;100000")
-        new_fill = _make_fill(execId="NEW", timestamp="20250403;130000")
+        old_fill = _make_fill(execId="OLD", timestamp="2025-04-03T10:00:00")
+        new_fill = _make_fill(execId="NEW", timestamp="2025-04-03T13:00:00")
 
         cfg = _MockPollerConfig(
             fetch=lambda: "<xml/>",
@@ -406,8 +421,8 @@ class TestPollOnce:
         dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
     ) -> None:
         """Fill with timestamp == watermark passes the >= filter and is processed."""
-        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
-        fill = _make_fill(execId="BOUNDARY", timestamp="20250403;120000")
+        set_last_poll_ts(meta_db, to_epoch("2025-04-03T12:00:00"), "ibkr")
+        fill = _make_fill(execId="BOUNDARY", timestamp="2025-04-03T12:00:00")
         cfg = _MockPollerConfig(parse=lambda _: ([fill], []))
         _set_poller(cfg)
         result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
@@ -425,8 +440,8 @@ class TestPollOnce:
         that was never processed should still be absent from the dedup DB after
         being filtered out, confirming it never reached that layer.
         """
-        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
-        old_fill = _make_fill(execId="OLD_UNSEEN", timestamp="20250403;110000")
+        set_last_poll_ts(meta_db, to_epoch("2025-04-03T12:00:00"), "ibkr")
+        old_fill = _make_fill(execId="OLD_UNSEEN", timestamp="2025-04-03T11:00:00")
         cfg = _MockPollerConfig(parse=lambda _: ([old_fill], []))
         _set_poller(cfg)
         result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
@@ -445,10 +460,10 @@ class TestPollOnce:
         in a previous cycle, its timestamp equals the watermark (the common case
         because watermark is set to max_ts of the last processed batch).
         """
-        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
+        set_last_poll_ts(meta_db, to_epoch("2025-04-03T12:00:00"), "ibkr")
         mark_processed_batch(dedup_db, ["ibkr:TX1"])
 
-        fill = _make_fill(execId="TX1", timestamp="20250403;120000")
+        fill = _make_fill(execId="TX1", timestamp="2025-04-03T12:00:00")
         cfg = _MockPollerConfig(parse=lambda _: ([fill], []))
         _set_poller(cfg)
         result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
@@ -465,17 +480,17 @@ class TestPollOnce:
         When a candidate with a higher timestamp is blocked by dedup, the watermark
         must not advance past the highest timestamp that was actually processed.
         """
-        set_last_poll_ts(meta_db, "20250403;120000", "ibkr")
+        set_last_poll_ts(meta_db, to_epoch("2025-04-03T12:00:00"), "ibkr")
         mark_processed_batch(dedup_db, ["ibkr:ALREADY_SEEN"])
 
-        already_seen = _make_fill(execId="ALREADY_SEEN", timestamp="20250403;150000")
-        new_fill = _make_fill(execId="NEW", timestamp="20250403;130000")
+        already_seen = _make_fill(execId="ALREADY_SEEN", timestamp="2025-04-03T15:00:00")
+        new_fill = _make_fill(execId="NEW", timestamp="2025-04-03T13:00:00")
         cfg = _MockPollerConfig(parse=lambda _: ([already_seen, new_fill], []))
         _set_poller(cfg)
         poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
 
         # Watermark reflects max of new fills only, not the dedup-blocked one
-        assert get_last_poll_ts(meta_db, "ibkr") == "20250403;130000"
+        assert get_last_poll_ts(meta_db, "ibkr") == to_epoch("2025-04-03T13:00:00")
 
     @patch("relay_core.poller_engine.notify")
     def test_all_fills_filtered_by_watermark_no_webhook_no_dedup_write(
@@ -483,15 +498,15 @@ class TestPollOnce:
         dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
     ) -> None:
         """When all fills are older than the watermark: no webhook, watermark unchanged, nothing written to dedup."""
-        set_last_poll_ts(meta_db, "20250403;150000", "ibkr")
-        old1 = _make_fill(execId="OLD1", timestamp="20250403;100000")
-        old2 = _make_fill(execId="OLD2", timestamp="20250403;110000")
+        set_last_poll_ts(meta_db, to_epoch("2025-04-03T15:00:00"), "ibkr")
+        old1 = _make_fill(execId="OLD1", timestamp="2025-04-03T10:00:00")
+        old2 = _make_fill(execId="OLD2", timestamp="2025-04-03T11:00:00")
         cfg = _MockPollerConfig(parse=lambda _: ([old1, old2], []))
         _set_poller(cfg)
         result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
         assert result == []
         mock_notify.assert_not_called()
-        assert get_last_poll_ts(meta_db, "ibkr") == "20250403;150000"
+        assert get_last_poll_ts(meta_db, "ibkr") == to_epoch("2025-04-03T15:00:00")
         assert len(get_processed_ids(dedup_db, {"ibkr:OLD1", "ibkr:OLD2"})) == 0
 
     @patch("relay_core.poller_engine.notify")
@@ -505,9 +520,9 @@ class TestPollOnce:
         a full poll_once() cycle on index 1 (no watermark) and confirms the
         fill is processed and only the index 1 watermark is updated.
         """
-        set_last_poll_ts(meta_db, "20250403;120000", "ibkr", poller_index=0)
+        set_last_poll_ts(meta_db, to_epoch("2025-04-03T12:00:00"), "ibkr", poller_index=0)
 
-        fill = _make_fill(execId="TX_IDX1", timestamp="20250403;100000")
+        fill = _make_fill(execId="TX_IDX1", timestamp="2025-04-03T10:00:00")
         cfg_idx1 = _MockPollerConfig(parse=lambda _: ([fill], []))
         relay = get_relay("ibkr")
         relay.poller_configs = [_MockPollerConfig(), cfg_idx1]
@@ -517,6 +532,6 @@ class TestPollOnce:
         mock_notify.assert_called_once()
 
         # Index 0 watermark untouched
-        assert get_last_poll_ts(meta_db, "ibkr", poller_index=0) == "20250403;120000"
+        assert get_last_poll_ts(meta_db, "ibkr", poller_index=0) == to_epoch("2025-04-03T12:00:00")
         # Index 1 watermark now reflects what it processed
-        assert get_last_poll_ts(meta_db, "ibkr", poller_index=1) == "20250403;100000"
+        assert get_last_poll_ts(meta_db, "ibkr", poller_index=1) == to_epoch("2025-04-03T10:00:00")

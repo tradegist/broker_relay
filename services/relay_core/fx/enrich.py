@@ -112,15 +112,22 @@ def _parse_trade_date(ts: str) -> _date | None:
 
     Every Fill reaching this layer has been normalised by the relay
     adapter via :func:`shared.normalize_timestamp` — no broker-specific
-    formats need to be handled here. Returns None only when *ts* is
-    empty or somehow not in the canonical form (which would indicate a
-    bug upstream).
+    formats need to be handled here. Returns ``None`` for empty or
+    unparseable input; unparseable inputs also emit a warning log since
+    they indicate a broken upstream contract (the FX layer should only
+    ever see canonical ISO strings).
     """
     if not ts:
         return None
     try:
         return datetime.fromisoformat(ts).date()
     except ValueError:
+        log.warning(
+            "FX: non-canonical timestamp %r reached enrichment — "
+            "upstream relay should have normalised this. Falling back to "
+            "latest/no-rate for this trade.",
+            ts,
+        )
         return None
 
 

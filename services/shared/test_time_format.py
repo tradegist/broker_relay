@@ -3,7 +3,7 @@
 import unittest
 from zoneinfo import ZoneInfo
 
-from .time_format import normalize_timestamp, parse_timezone
+from .time_format import normalize_timestamp, parse_timezone, to_epoch
 
 
 class TestNormalizeTimestamp(unittest.TestCase):
@@ -69,6 +69,27 @@ class TestNormalizeTimestamp(unittest.TestCase):
     def test_slashes_raise(self) -> None:
         with self.assertRaises(ValueError):
             normalize_timestamp("2026/04/11 10:30:00")
+
+
+class TestToEpoch(unittest.TestCase):
+
+    def test_canonical_form_utc(self) -> None:
+        # 2025-04-03T12:00:00 UTC == 1743681600
+        assert to_epoch("2025-04-03T12:00:00") == 1743681600
+
+    def test_empty_returns_zero(self) -> None:
+        assert to_epoch("") == 0
+
+    def test_tz_aware_input_converts_to_utc(self) -> None:
+        # 12:00 +02:00 == 10:00 UTC
+        assert to_epoch("2025-04-03T12:00:00+02:00") == to_epoch("2025-04-03T10:00:00")
+
+    def test_monotonic(self) -> None:
+        assert to_epoch("2025-04-03T12:00:00") < to_epoch("2025-04-03T12:00:01")
+
+    def test_unparseable_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            to_epoch("not a timestamp")
 
 
 class TestParseTimezone(unittest.TestCase):
