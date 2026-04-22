@@ -1,6 +1,6 @@
 .PHONY: deps setup deploy destroy pause resume sync poll test-webhook ibkr-flex-dump ibkr-flex-refresh types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats ssh help
 
-PROJECT = broker-relay
+PROJECT = relayport
 PYTHON ?= .venv/bin/python3
 E2E_ENV = .env.test
 E2E_COMPOSE = SITE_DOMAIN=unused API_TOKEN=test-token docker compose -f docker-compose.yml -f docker-compose.test.yml -p $(PROJECT)-test --env-file $(E2E_ENV)
