@@ -110,14 +110,19 @@ def _deploy_standalone():
 
 
 def _template_caddy_snippet(src: Path) -> str:
-    """Replace Caddy {$VAR} and {$VAR:-default} placeholders with env var values.
+    """Pre-template a Caddy snippet by substituting {$VAR} and {$VAR:-default} placeholders.
+
+    This is the CLI's own pre-templating step, run before snippets are uploaded to Caddy.
+    Supports both bash-style ``{$VAR:-default}`` and Caddy-native ``{$VAR:default}``
+    (single colon) — both are substituted here so Caddy never needs to expand them at
+    runtime (the Caddy container does not have access to the CLI's env vars).
 
     Substitutes each ``{$NAME}`` with the corresponding environment variable.
-    ``{$NAME:-default}`` uses the default when the env var is unset or empty.
+    ``{$NAME:-default}`` / ``{$NAME:default}`` uses the default when the env var is unset or empty.
     Raises if any required var (no default) is not set.
     """
     content = src.read_text()
-    pattern = re.compile(r'\{\$([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}')
+    pattern = re.compile(r'\{\$([A-Z_][A-Z0-9_]*)(?::-?([^}]*))?\}')
     refs = pattern.findall(content)
     if not refs:
         return content
