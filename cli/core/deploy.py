@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -55,7 +56,10 @@ def _deploy_standalone():
     except ValueError:
         existing_ip = ""
     if existing_ip:
-        state = terraform("state", "list", capture=True).stdout
+        try:
+            state = terraform("state", "list", capture=True).stdout
+        except subprocess.CalledProcessError:
+            state = ""
         if "digitalocean_reserved_ip.relay" not in state:
             print(f"Importing existing reserved IP {existing_ip}...")
             terraform("import", "digitalocean_reserved_ip.relay", existing_ip)
