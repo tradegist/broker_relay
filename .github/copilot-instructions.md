@@ -29,6 +29,7 @@ RelayPort is a **relay between broker accounts** that provides clear, common int
 - **No hardcoded IPs** — use `DROPLET_IP` from `.env.droplet`. In documentation, use `1.2.3.4` as placeholder.
 - **No hardcoded domains** — use `example.com` variants (`trade.example.com`) in docs and code. Actual domains are loaded at runtime via `SITE_DOMAIN` env var.
 - **No email addresses or personal info** — never write real names, emails, or account IDs in committed files. Use `UXXXXXXX` for IBKR account examples.
+- **No developer-machine paths** — never write absolute paths like `/Users/john/...` or `C:\Users\john\...` in any committed file (docs, instructions, configs, comments). These leak personal and machine-specific information into a public repo. Reference sibling projects by name only, never by local filesystem path.
 - **No logging of secrets or sensitive operational data** — never `log.info()` or `print()` tokens, passwords, or API keys. Log actions and outcomes, not credential values. When adding any `log.info()` or `log.debug()` call, check whether the logged value contains sensitive fields (e.g. `accountId`, `acctAlias`, account numbers, IPs, domains). Never log full model dumps at `info` level — use `log.debug` with explicit field exclusion: `log.debug("Trade: %s", trade.model_dump_json(exclude={"accountId", "acctAlias"}))`. Prefer logging counts, symbols, and statuses over full objects.
 - **`.env`, `.env.droplet`, `.env.relays`, `*.tfvars`, and `.env.test` are gitignored** — never commit them. Use `env_examples/` templates with placeholder values as reference.
 - **Raw Flex XML dumps must never be committed.** Live Flex responses contain real account IDs, execution IDs, and order IDs. Always sanitize via `make ibkr-flex-refresh` (or `fixtures/sanitize.py` directly) before committing any Flex XML. The intermediate raw file (`fixtures/raw.xml`) is gitignored. Only the sanitized fixtures (`activity_flex_sample.xml`, `trade_confirm_sample.xml`) are committed.
@@ -122,9 +123,9 @@ RelayPort is a **relay between broker accounts** that provides clear, common int
 
 Configuration is split into three env files to separate concerns and enable scalable relay configuration:
 
-- **`.env`** — App-level config: `SITE_DOMAIN`, `API_TOKEN`, `NOTIFIERS`, `RELAYS`, `POLL_INTERVAL`, listener settings, `TIME_ZONE`. Injected into the `relays` container via `env_file:` in `docker-compose.yml`. Pushed to the droplet by `make sync` / `make deploy`.
+- **`.env`** — App-level config: `SITE_DOMAIN`, `API_TOKEN`, `NOTIFIERS`, `RELAYS`, `POLL_INTERVAL`, listener settings. Injected into the `relays` container via `env_file:` in `docker-compose.yml`. Pushed to the droplet by `make sync` / `make deploy`.
 - **`.env.relays`** — Relay-prefixed env vars: `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, relay-specific overrides (`IBKR_NOTIFIERS`, `IBKR_TARGET_WEBHOOK_URL`). Also injected via `env_file:` (marked `required: false` so the stack starts even without it). Adding a new relay's vars requires no compose changes — just add the prefixed vars.
-- **`.env.droplet`** — CLI-only vars: `DEPLOY_MODE`, `DO_API_TOKEN`, `DROPLET_IP`, `SSH_KEY`, `DROPLET_SIZE`. **Never pushed to the droplet or injected into containers.** Only used by `cli/` commands.
+- **`.env.droplet`** — Developer-machine-only vars that are never pushed to the droplet or injected into containers. The name reflects its origin (droplet infrastructure config) but its scope is broader: any var that belongs on the developer's machine rather than the server lives here. Currently: `DEPLOY_MODE`, `DO_API_TOKEN`, `DROPLET_IP`, `SSH_KEY`, `DROPLET_SIZE`, `DEFAULT_CLI_RELAY_ENV`. Only read by `cli/` commands and the Makefile.
 - **`.env.test`** — E2E test config. Used only in `docker-compose.test.yml` via `env_file: !override`.
 - **Templates** live in `env_examples/` (gitignored names: `env`, `env.droplet`, `env.relays`, `env.test`). `make setup` copies them to `.<name>` if missing.
 
@@ -237,6 +238,10 @@ During shared deploy, snippet files are **templated** — all `{$VAR}` placehold
 
 - **`sites/*.caddy`** contain `handle` blocks imported inside the `{$SITE_DOMAIN}` site definition. Each project writes one snippet. Routes must be prefixed to avoid collisions. The `debug.caddy` snippet routes `/debug/webhook/*` to the `debug` container.
 - This structure allows multiple projects to share a single Caddy instance on the same droplet.
+
+## Sibling Project: ibkr_bridge
+
+This project (`relayport`) and its sibling project `ibkr_bridge` share the same CLI deploy/destroy/sync infrastructure pattern. **Any change to `cli/core/deploy.py`, `cli/core/destroy.py`, or `cli/core/sync.py` in this project must be mirrored in the sibling project, and vice versa.** This includes: Terraform state management, reserved IP handling, rsync exclusions, env file push logic, and compose startup commands. When you modify CLI core logic here, explicitly remind the user to apply the equivalent change to `ibkr_bridge`, and offer to do it in the same session.
 
 ## Deployment Modes
 

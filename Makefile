@@ -33,12 +33,14 @@ setup: ## Create .venv and install all dependencies
 	@echo "$(CURDIR)/services/relay_core" >> $$(find .venv/lib -name site-packages -type d)/$(PROJECT).pth
 	@for f in env_examples/*; do \
 		name=$$(basename "$$f"); \
+		[ "$$name" = "env.test" ] && continue; \
 		target="./.$${name}"; \
 		if [ ! -f "$$target" ]; then \
 			cp "$$f" "$$target"; \
 			echo "  Created .$${name}"; \
 		fi; \
 	done
+	@[ -f .env.test ] || echo "  NOTE: .env.test not auto-created — cp env_examples/env.test .env.test and set real paper-account values before running E2E tests."
 
 deploy: ## Deploy infrastructure (Terraform + Docker)
 	$(PYTHON) -m cli deploy
@@ -53,7 +55,7 @@ resume: ## Restore droplet from snapshot
 	$(PYTHON) -m cli resume
 
 sync: ## Push .env + restart (S=service B=1 LOCAL_FILES=1 SKIP_E2E=1 ENV=local)
-	@. ./.env 2>/dev/null; \
+	@. ./.env 2>/dev/null; . ./.env.droplet 2>/dev/null; \
 	env="$${RELAY_ENV:-$${DEFAULT_CLI_RELAY_ENV:-prod}}"; \
 	[ -n "$(ENV)" ] && env="$(ENV)"; \
 	if [ "$$env" = "local" ]; then \
@@ -141,7 +143,7 @@ local-down: ## Stop local stack
 	$(LOCAL_COMPOSE) down
 
 e2e-up: ## Start E2E test stack (relays + debug)
-	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — run: make setup (or cp env_examples/env.test .env.test)"; exit 1; }
+	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — cp env_examples/env.test .env.test and set real paper-account values"; exit 1; }
 	@if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		echo "Stack already running and connected"; \
 	else \
@@ -169,7 +171,7 @@ e2e-run: ## Run E2E tests (stack must be up)
 	$(PYTHON) -m pytest services/relay_core/tests/e2e/ -v
 
 e2e: ## Run E2E tests (starts/stops stack automatically)
-	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — run: make setup (or cp env_examples/env.test .env.test)"; exit 1; }
+	@test -f $(E2E_ENV) || { echo "ERROR: $(E2E_ENV) not found — cp env_examples/env.test .env.test and set real paper-account values"; exit 1; }
 	@was_up=false; \
 	if curl -sf http://localhost:15011/health | grep -q '"status": "ok"'; then \
 		was_up=true; \
@@ -179,20 +181,25 @@ e2e: ## Run E2E tests (starts/stops stack automatically)
 	exit $$ret
 
 logs: ## Stream logs (S=service ENV=local, default: poller on droplet)
-	@. ./.env && \
+	@. ./.env 2>/dev/null; . ./.env.droplet 2>/dev/null; \
 	env="$${RELAY_ENV:-$${DEFAULT_CLI_RELAY_ENV:-prod}}"; \
 	[ -n "$(ENV)" ] && env="$(ENV)"; \
 	if [ "$$env" = "local" ]; then \
 		$(LOCAL_COMPOSE) logs -f $(or $(S),relays); \
 	else \
+		[ -n "$$DROPLET_IP" ] || { echo "Error: DROPLET_IP not set — run 'make deploy' first"; exit 1; }; \
 		ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
 			'cd /opt/$(PROJECT) && docker compose logs -f $(or $(S),relays)'; \
 	fi
 
 stats: ## Show container resource usage
-	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
+	@. ./.env 2>/dev/null; . ./.env.droplet 2>/dev/null; \
+	[ -n "$$DROPLET_IP" ] || { echo "Error: DROPLET_IP not set — run 'make deploy' first"; exit 1; }; \
+	ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
 		'docker stats --no-stream'
 
 ssh: ## SSH into the droplet
-	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP
+	@. ./.env 2>/dev/null; . ./.env.droplet 2>/dev/null; \
+	[ -n "$$DROPLET_IP" ] || { echo "Error: DROPLET_IP not set — run 'make deploy' first"; exit 1; }; \
+	ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP
 
