@@ -29,6 +29,7 @@ RelayPort is a **relay between broker accounts** that provides clear, common int
 - **No hardcoded IPs** — use `DROPLET_IP` from `.env.droplet`. In documentation, use `1.2.3.4` as placeholder.
 - **No hardcoded domains** — use `example.com` variants (`trade.example.com`) in docs and code. Actual domains are loaded at runtime via `SITE_DOMAIN` env var.
 - **No email addresses or personal info** — never write real names, emails, or account IDs in committed files. Use `UXXXXXXX` for IBKR account examples.
+- **No developer-machine paths** — never write absolute paths like `/Users/john/...` or `C:\Users\john\...` in any committed file (docs, instructions, configs, comments). These leak personal and machine-specific information into a public repo. Reference sibling projects by name only, never by local filesystem path.
 - **No logging of secrets or sensitive operational data** — never `log.info()` or `print()` tokens, passwords, or API keys. Log actions and outcomes, not credential values. When adding any `log.info()` or `log.debug()` call, check whether the logged value contains sensitive fields (e.g. `accountId`, `acctAlias`, account numbers, IPs, domains). Never log full model dumps at `info` level — use `log.debug` with explicit field exclusion: `log.debug("Trade: %s", trade.model_dump_json(exclude={"accountId", "acctAlias"}))`. Prefer logging counts, symbols, and statuses over full objects.
 - **`.env`, `.env.droplet`, `.env.relays`, `*.tfvars`, and `.env.test` are gitignored** — never commit them. Use `env_examples/` templates with placeholder values as reference.
 - **Raw Flex XML dumps must never be committed.** Live Flex responses contain real account IDs, execution IDs, and order IDs. Always sanitize via `make ibkr-flex-refresh` (or `fixtures/sanitize.py` directly) before committing any Flex XML. The intermediate raw file (`fixtures/raw.xml`) is gitignored. Only the sanitized fixtures (`activity_flex_sample.xml`, `trade_confirm_sample.xml`) are committed.
@@ -240,7 +241,7 @@ During shared deploy, snippet files are **templated** — all `{$VAR}` placehold
 
 ## Sibling Project: ibkr_bridge
 
-This project (`relayport`) and `ibkr_bridge` (`/Users/seb/Repositories/ibkr_bridge`) share the same CLI deploy/destroy/sync infrastructure pattern. **Any change to `cli/core/deploy.py`, `cli/core/destroy.py`, or `cli/core/sync.py` in this project must be mirrored in the sibling project, and vice versa.** This includes: Terraform state management, reserved IP handling, rsync exclusions, env file push logic, and compose startup commands. When you modify CLI core logic here, explicitly remind the user to apply the equivalent change to `ibkr_bridge`, and offer to do it in the same session.
+This project (`relayport`) and its sibling project `ibkr_bridge` share the same CLI deploy/destroy/sync infrastructure pattern. **Any change to `cli/core/deploy.py`, `cli/core/destroy.py`, or `cli/core/sync.py` in this project must be mirrored in the sibling project, and vice versa.** This includes: Terraform state management, reserved IP handling, rsync exclusions, env file push logic, and compose startup commands. When you modify CLI core logic here, explicitly remind the user to apply the equivalent change to `ibkr_bridge`, and offer to do it in the same session.
 
 ## Deployment Modes
 

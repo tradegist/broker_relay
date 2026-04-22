@@ -53,7 +53,7 @@ resume: ## Restore droplet from snapshot
 	$(PYTHON) -m cli resume
 
 sync: ## Push .env + restart (S=service B=1 LOCAL_FILES=1 SKIP_E2E=1 ENV=local)
-	@. ./.env 2>/dev/null; \
+	@. ./.env 2>/dev/null; . ./.env.droplet 2>/dev/null; \
 	env="$${RELAY_ENV:-$${DEFAULT_CLI_RELAY_ENV:-prod}}"; \
 	[ -n "$(ENV)" ] && env="$(ENV)"; \
 	if [ "$$env" = "local" ]; then \
@@ -179,7 +179,7 @@ e2e: ## Run E2E tests (starts/stops stack automatically)
 	exit $$ret
 
 logs: ## Stream logs (S=service ENV=local, default: poller on droplet)
-	@. ./.env && \
+	@. ./.env 2>/dev/null; . ./.env.droplet 2>/dev/null; \
 	env="$${RELAY_ENV:-$${DEFAULT_CLI_RELAY_ENV:-prod}}"; \
 	[ -n "$(ENV)" ] && env="$(ENV)"; \
 	if [ "$$env" = "local" ]; then \
@@ -190,9 +190,11 @@ logs: ## Stream logs (S=service ENV=local, default: poller on droplet)
 	fi
 
 stats: ## Show container resource usage
-	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
+	@. ./.env 2>/dev/null; . ./.env.droplet 2>/dev/null; \
+	ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP \
 		'docker stats --no-stream'
 
 ssh: ## SSH into the droplet
-	@. ./.env && ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP
+	@. ./.env 2>/dev/null; . ./.env.droplet 2>/dev/null; \
+	ssh -i $${SSH_KEY:-$$HOME/.ssh/$(PROJECT)} root@$$DROPLET_IP
 

@@ -27,11 +27,16 @@ def run(args):
 
     # Remove the reserved IP from Terraform state so destroy does not delete it
     # from the DO account. It stays as an unassigned reserved IP and can be
-    # re-imported on the next deploy via RESERVED_IP in .env.droplet.
-    state = terraform("state", "list", capture=True).stdout
-    if "digitalocean_reserved_ip.relay" in state:
-        print("Preserving reserved IP (removing from Terraform state)...")
-        terraform("state", "rm", "digitalocean_reserved_ip.relay")
+    # re-imported on the next deploy via DROPLET_IP in .env.droplet.
+    # Wrapped in try/except: if state is missing or uninitialized, proceed
+    # with destroy anyway rather than blocking on a state inspection failure.
+    try:
+        state = terraform("state", "list", capture=True).stdout
+        if "digitalocean_reserved_ip.relay" in state:
+            print("Preserving reserved IP (removing from Terraform state)...")
+            terraform("state", "rm", "digitalocean_reserved_ip.relay")
+    except Exception:
+        pass
 
     terraform("destroy", "-auto-approve", "-input=false")
 
