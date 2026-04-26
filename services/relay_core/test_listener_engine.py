@@ -189,6 +189,76 @@ class TestSendAndMark(unittest.TestCase):
 
         mock_conn.close.assert_called_once()
 
+    @patch("relay_core.listener_engine.mark_processed_batch")
+    @patch("relay_core.listener_engine.notify")
+    @patch("relay_core.listener_engine.get_processed_ids", return_value=set())
+    @patch("relay_core.listener_engine._init_dedup_db")
+    def test_parse_errors_included_in_payload(
+        self,
+        mock_init_db: MagicMock,
+        mock_get_ids: MagicMock,
+        mock_notify: MagicMock,
+        mock_mark: MagicMock,
+    ) -> None:
+        """parse_errors appear in payload.errors alongside fills."""
+        mock_conn = MagicMock()
+        mock_init_db.return_value = mock_conn
+
+        fill = _make_fill()
+        _send_and_mark("ibkr", [fill], "/tmp/test.db", parse_errors=["bad timestamp"])
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        self.assertIn("bad timestamp", payload.errors)
+
+    @patch("relay_core.listener_engine.mark_processed_batch")
+    @patch("relay_core.listener_engine.notify")
+    @patch("relay_core.listener_engine.get_processed_ids", return_value=set())
+    @patch("relay_core.listener_engine._init_dedup_db")
+    def test_errors_only_triggers_notify_no_mark(
+        self,
+        mock_init_db: MagicMock,
+        mock_get_ids: MagicMock,
+        mock_notify: MagicMock,
+        mock_mark: MagicMock,
+    ) -> None:
+        """parse_errors alone (no fills) still call notify; nothing is marked."""
+        mock_conn = MagicMock()
+        mock_init_db.return_value = mock_conn
+
+        _send_and_mark("ibkr", [], "/tmp/test.db", parse_errors=["unrecognised side"])
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        self.assertEqual(payload.errors, ["unrecognised side"])
+        self.assertEqual(payload.data, [])
+        mock_mark.assert_not_called()
+
+    @patch("relay_core.listener_engine.mark_processed_batch")
+    @patch("relay_core.listener_engine.notify")
+    @patch("relay_core.listener_engine.get_processed_ids")
+    @patch("relay_core.listener_engine._init_dedup_db")
+    def test_already_seen_fill_with_errors_still_notifies(
+        self,
+        mock_init_db: MagicMock,
+        mock_get_ids: MagicMock,
+        mock_notify: MagicMock,
+        mock_mark: MagicMock,
+    ) -> None:
+        """When a fill is deduped away but parse_errors exist, notify is still called."""
+        mock_conn = MagicMock()
+        mock_init_db.return_value = mock_conn
+        mock_get_ids.return_value = {"ibkr:0001"}
+
+        fill = _make_fill()
+        _send_and_mark("ibkr", [fill], "/tmp/test.db", parse_errors=["missing qty"])
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        self.assertEqual(payload.errors, ["missing qty"])
+        self.assertEqual(payload.data, [])
+        mock_mark.assert_not_called()
+
 
 # ── _send_and_mark with REAL SQLite (in-memory-style file) ──────────
 
@@ -304,6 +374,26 @@ class TestSendNoMark(unittest.TestCase):
         self.assertEqual(len(payload.data), 1)
         self.assertEqual(payload.data[0].symbol, "AAPL")
         self.assertEqual(payload.relay, "ibkr")
+
+    @patch("relay_core.listener_engine.notify")
+    def test_parse_errors_included_in_payload(self, mock_notify: MagicMock) -> None:
+        """parse_errors appear in the payload sent by _send_no_mark."""
+        fill = _make_fill()
+        _send_no_mark("ibkr", [fill], parse_errors=["missing price field"])
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        self.assertIn("missing price field", payload.errors)
+
+    @patch("relay_core.listener_engine.notify")
+    def test_errors_only_triggers_notify(self, mock_notify: MagicMock) -> None:
+        """parse_errors alone (no fills) still call notify via _send_no_mark."""
+        _send_no_mark("ibkr", [], parse_errors=["unknown asset class"])
+
+        mock_notify.assert_called_once()
+        payload = mock_notify.call_args[0][1]
+        self.assertEqual(payload.errors, ["unknown asset class"])
+        self.assertEqual(payload.data, [])
 
 
 # ── _handle_event tests ─────────────────────────────────────────────
@@ -703,6 +793,138 @@ class TestHandleEvent(unittest.IsolatedAsyncioTestCase):
         )
         mock_send.assert_called_once()
 
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_error_result_forwarded_to_send_and_mark_with_fill(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """error + mark fill, no debounce → parse_errors forwarded to _send_and_mark."""
+        fill = _make_fill()
+
+        async def on_msg(
+            data: dict[str, Any],
+        ) -> list[OnMessageResult]:
+            return [
+                OnMessageResult(fill=fill, mark=True),
+                OnMessageResult(fill=None, error="bad timestamp"),
+            ]
+
+        config = ListenerConfig(
+            connect=_dummy_connect,
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        _set_listener(config)
+        await _handle_event(
+            "ibkr", {"type": "x"},
+            debounce_buf=None, db_path="/tmp/test.db",
+        )
+
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args[0]
+        # positional: relay_name, fills, db_path, parse_errors
+        self.assertEqual(call_args[3], ["bad timestamp"])
+
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_error_only_result_not_dispatched_without_debounce(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """error-only results with no fills and no debounce buffer are silently dropped."""
+        async def on_msg(
+            data: dict[str, Any],
+        ) -> list[OnMessageResult]:
+            return [OnMessageResult(fill=None, error="unrecognised side")]
+
+        config = ListenerConfig(
+            connect=_dummy_connect,
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        _set_listener(config)
+        await _handle_event(
+            "ibkr", {"type": "x"},
+            debounce_buf=None, db_path="/tmp/test.db",
+        )
+
+        mock_send.assert_not_called()
+
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_error_result_accumulated_in_debounce_buf_with_fill(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """error + mark fill + debounce → fill buffered, error accumulated via extend_errors."""
+        fill = _make_fill()
+
+        async def on_msg(
+            data: dict[str, Any],
+        ) -> list[OnMessageResult]:
+            return [
+                OnMessageResult(fill=fill, mark=True),
+                OnMessageResult(fill=None, error="bad timestamp"),
+            ]
+
+        config = ListenerConfig(
+            connect=_dummy_connect,
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        buf = DebounceBuffer(relay_name="ibkr", debounce_ms=5000, db_path="/tmp/test.db")
+        _set_listener(config)
+        await _handle_event(
+            "ibkr", {"type": "x"},
+            debounce_buf=buf, db_path="/tmp/test.db",
+        )
+
+        self.assertEqual(len(buf._buffer), 1)
+        self.assertEqual(buf._buffer[0].execId, fill.execId)
+        self.assertEqual(buf._parse_errors, ["bad timestamp"])
+        mock_send.assert_not_called()
+
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_error_only_result_not_accumulated_in_debounce_buf(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """error-only results (no fills) are not forwarded to the debounce buffer."""
+        async def on_msg(
+            data: dict[str, Any],
+        ) -> list[OnMessageResult]:
+            return [OnMessageResult(fill=None, error="unrecognised side")]
+
+        config = ListenerConfig(
+            connect=_dummy_connect,
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        buf = DebounceBuffer(relay_name="ibkr", debounce_ms=5000, db_path="/tmp/test.db")
+        _set_listener(config)
+        await _handle_event(
+            "ibkr", {"type": "x"},
+            debounce_buf=buf, db_path="/tmp/test.db",
+        )
+
+        self.assertEqual(len(buf._buffer), 0)
+        self.assertEqual(buf._parse_errors, [])
+        mock_send.assert_not_called()
+
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_fill_none_without_error_not_accumulated(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """fill=None with no error field produces no error entry — result is fully silent."""
+        async def on_msg(
+            data: dict[str, Any],
+        ) -> list[OnMessageResult]:
+            return [OnMessageResult(fill=None)]  # no error set
+
+        config = ListenerConfig(
+            connect=_dummy_connect,
+            on_message=on_msg, event_filter=lambda _: True,
+        )
+        buf = DebounceBuffer(relay_name="ibkr", debounce_ms=5000, db_path="/tmp/test.db")
+        _set_listener(config)
+        await _handle_event(
+            "ibkr", {"type": "x"},
+            debounce_buf=buf, db_path="/tmp/test.db",
+        )
+
+        self.assertEqual(buf._parse_errors, [])
+        mock_send.assert_not_called()
+
 
 # ── DebounceBuffer tests ────────────────────────────────────────────
 
@@ -891,3 +1113,72 @@ class TestDebounceBuffer(unittest.IsolatedAsyncioTestCase):
             buf._flush_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await buf._flush_task
+
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_extend_errors_flushed_with_fills(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """Errors accumulated via extend_errors are passed to _send_and_mark on flush."""
+        buf = DebounceBuffer(relay_name="ibkr", debounce_ms=5000, db_path="/tmp/test.db")
+        fill = _make_fill(exec_id="E001")
+        await buf.add(fill)
+        buf.extend_errors(["bad timestamp"])
+
+        await buf.flush()
+
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args[0]
+        self.assertEqual(call_args[3], ["bad timestamp"])
+        self.assertEqual(buf._parse_errors, [])
+
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_flush_with_errors_only(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """extend_errors without any fill still triggers _send_and_mark with empty fills."""
+        buf = DebounceBuffer(relay_name="ibkr", debounce_ms=5000, db_path="/tmp/test.db")
+        buf.extend_errors(["missing field"])
+
+        await buf.flush()
+
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args[0]
+        self.assertEqual(call_args[1], [])  # empty fills
+        self.assertEqual(call_args[3], ["missing field"])
+        self.assertEqual(buf._parse_errors, [])
+
+    @patch(
+        "relay_core.listener_engine._send_and_mark",
+        side_effect=RuntimeError("webhook down"),
+    )
+    async def test_flush_restores_errors_on_failure(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """Errors are restored to _parse_errors when _send_and_mark fails."""
+        buf = DebounceBuffer(relay_name="ibkr", debounce_ms=5000, db_path="/tmp/test.db")
+        fill = _make_fill(exec_id="ERR2")
+        await buf.add(fill)
+        buf.extend_errors(["bad timestamp"])
+
+        await buf.flush()
+
+        self.assertEqual(len(buf._buffer), 1)
+        self.assertEqual(buf._buffer[0].execId, "ERR2")
+        self.assertEqual(buf._parse_errors, ["bad timestamp"])
+
+    @patch("relay_core.listener_engine._send_and_mark")
+    async def test_multiple_extend_errors_accumulate(
+        self, mock_send: MagicMock,
+    ) -> None:
+        """Multiple extend_errors calls accumulate before a single flush."""
+        buf = DebounceBuffer(relay_name="ibkr", debounce_ms=5000, db_path="/tmp/test.db")
+        fill = _make_fill(exec_id="E002")
+        await buf.add(fill)
+        buf.extend_errors(["error one"])
+        buf.extend_errors(["error two", "error three"])
+
+        await buf.flush()
+
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args[0]
+        self.assertEqual(call_args[3], ["error one", "error two", "error three"])
