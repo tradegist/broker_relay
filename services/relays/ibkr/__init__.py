@@ -12,6 +12,7 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import aiohttp
+from pydantic import ValidationError
 
 from relay_core import (
     BaseNotifier,
@@ -170,22 +171,20 @@ _SIDE_MAP: dict[str, BuySell] = {
 }
 
 
-def _map_fill(envelope: WsEnvelope, tz: ZoneInfo) -> Fill | None:
+def _map_fill(envelope: WsEnvelope, tz: ZoneInfo) -> Fill:
     """Map a WsEnvelope with fill data to a relay Fill model.
 
-    Returns None and logs an error if:
-    - The envelope has no fill data (status events).
+    Raises ``ValueError`` describing why the fill was skipped if:
+    - The envelope has no fill data.
     - The execution side is not ``"BOT"`` or ``"SLD"``.
     - The execution time cannot be parsed.
 
     *tz* is the IANA timezone to interpret IBKR's naive timestamps in.
     """
     if envelope.fill is None:
-        log.error(
-            "IBKR WsEnvelope seq=%d type=%s has no fill data",
-            envelope.seq, envelope.type,
+        raise ValueError(
+            f"WsEnvelope seq={envelope.seq} type={envelope.type!r} has no fill data"
         )
-        return None
 
     ex = envelope.fill.execution
     contract = envelope.fill.contract
@@ -193,29 +192,24 @@ def _map_fill(envelope: WsEnvelope, tz: ZoneInfo) -> Fill | None:
 
     exec_id = ex.execId.strip()
     if not exec_id:
-        log.error(
-            "Empty execId for envelope seq=%d type=%s symbol=%s — skipping fill",
-            envelope.seq, envelope.type, contract.symbol,
+        raise ValueError(
+            f"Empty execId in envelope seq={envelope.seq} type={envelope.type!r}"
+            f" symbol={contract.symbol!r}"
         )
-        return None
 
     # Financial enum — never assume a default for buy/sell side.
     side = _SIDE_MAP.get(ex.side)
     if side is None:
-        log.error(
-            "Unknown execution side %r for execId=%s — skipping fill",
-            ex.side, exec_id,
+        raise ValueError(
+            f"Unknown execution side {ex.side!r} for execId={exec_id!r}"
         )
-        return None
 
     try:
         ts = normalize_timestamp(bridge_to_iso(ex.time), assume_tz=tz)
     except ValueError as exc:
-        log.error(
-            "Bad execution time %r for execId=%s — skipping fill: %s",
-            ex.time, exec_id, exc,
-        )
-        return None
+        raise ValueError(
+            f"Bad execution time {ex.time!r} for execId={exec_id!r}: {exc}"
+        ) from exc
 
     source = cast(Source, envelope.type)
     currency = contract.currency.strip().upper() or None
@@ -265,13 +259,18 @@ def _on_message_factory(
 
         try:
             envelope = WsEnvelope.model_validate(data)
-        except Exception:
-            log.exception("Failed to validate IBKR WsEnvelope (type=%s)", event_type)
-            return []
+        except ValidationError as exc:
+            sanitized = "; ".join(
+                f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
+                for e in exc.errors(include_input=False, include_url=False)
+            )
+            log.error("Failed to validate IBKR WsEnvelope (type=%r): %s", event_type, sanitized)
+            return [OnMessageResult(error=f"Invalid IBKR envelope (type={event_type!r})")]
 
-        fill = _map_fill(envelope, tz)
-        if fill is None:
-            return []
+        try:
+            fill = _map_fill(envelope, tz)
+        except ValueError as exc:
+            return [OnMessageResult(error=str(exc))]
 
         if envelope.type == "execDetailsEvent":
             if not exec_events_enabled:
